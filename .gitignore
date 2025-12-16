@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+
+# Environnements
+.venv/
+venv/
+
+# VS Code server (TON PROBLÈME ACTUEL)
+.vscode-server/
+
+# Data / models
+data/
+models/
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.joblib
+
+# OS
+.DS_Store
