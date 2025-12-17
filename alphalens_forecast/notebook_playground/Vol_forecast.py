@@ -130,7 +130,9 @@ from alphalens_forecast.models.router import ModelRouter
 from alphalens_forecast.data import DataProvider   
 from alphalens_forecast.evaluation import load_model, test_model, time_split, plot_forecast_vs_real
 import pandas as pd
+import numpy as np
 from arch import arch_model
+import matplotlib.pyplot as plt
 
 data_provider = DataProvider()
 df = data_provider.load_data("EUR_USD", "15min")
@@ -142,8 +144,18 @@ garch_trained = garch_model.fit()
 
 garch_trained.summary()
 
-forecast_vol = garch_trained.forecast(horizon=len(test),reindex=False,method="analytic")
+forecast_vol = garch_trained.forecast(horizon=len(test),reindex=False,method="bootstrap", simulations=1000)
+paths_sigma = np.sqrt(forecast_vol.variance.iloc[-1]) / 1000  # rescale back to original units
 
 
+# %%
+
+plt.plot(paths_sigma, color='red', label='GARCH Vol Forecast')
+plt.plot(test.index, test.values, color='blue', label='Realised Returns')
+plt.title('GARCH Volatility Forecast vs Realised Returns')
+plt.xlabel('Time')
+plt.ylabel('Volatility / Returns')
+plt.legend()
+plt.show()  
 
 # %%
