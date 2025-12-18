@@ -45,12 +45,41 @@ class DataProvider:
         timeframe_slug = slugify(timeframe)
         return self._cache_dir / symbol_slug / f"{timeframe_slug}.csv"
 
+    def _resolve_api_symbol(self, symbol: str) -> str:
+        """
+        Normalize symbols for Twelve Data without affecting cache naming.
+
+        Twelve Data typically expects FX/crypto pairs formatted as ``BASE/QUOTE``.
+        Locally we often pass/cache them as ``BASE_QUOTE``. To avoid breaking
+        legacy cache keys while allowing refresh/range fetches, convert the
+        pair format only when it is unambiguous.
+        """
+        raw = (symbol or "").strip()
+        if "/" in raw or "_" not in raw:
+            return raw
+        parts = raw.split("_")
+        if len(parts) != 2:
+            return raw
+        base, quote = parts[0].strip(), parts[1].strip()
+        # Heuristic: treat 2-6 char alnum tickers as a pair (EUR_USD, BTC_USD, XLM_USD).
+        if not (2 <= len(base) <= 6 and 2 <= len(quote) <= 6):
+            return raw
+        if not (base.isalnum() and quote.isalnum()):
+            return raw
+        normalized = f"{base}/{quote}"
+        logger.debug("Normalized symbol for API: %s -> %s", raw, normalized)
+        return normalized
+
     def load_data(
         self,
         symbol: str,
         timeframe: str,
         refresh: bool = False,
         max_points: Optional[int] = None,
+        *,
+        start: Optional[pd.Timestamp] = None,
+        end: Optional[pd.Timestamp] = None,
+        range_cache: str = "none",
     ) -> pd.DataFrame:
         """
         Return a historical dataframe, using cache when possible.
@@ -61,14 +90,129 @@ class DataProvider:
             Series identifier.
         refresh:
             Force a fresh download even if cache exists.
+        start, end:
+            Optional datetime bounds (inclusive) for range queries. When either is provided,
+            the provider will not overwrite cached CSVs by default (read-only access).
+        range_cache:
+            Controls persistence behavior for range queries only:
+            - ``"none"`` (default): read-only, do not modify cache on disk.
+            - ``"merge"``: merge fetched history into the main cache CSV (append-only semantics).
+            - ``"separate"``: write the returned subset to a separate cache file that includes the
+              requested start/end in its filename. The main cache is left untouched.
         """
+        range_start = pd.to_datetime(start, utc=True) if start is not None else None
+        range_end = pd.to_datetime(end, utc=True) if end is not None else None
+        if range_start is not None and range_end is not None and range_end < range_start:
+            raise ValueError("end must be >= start for DataProvider.load_data().")
+        is_range_query = range_start is not None or range_end is not None
+        range_cache = (range_cache or "none").strip().lower()
+        if range_cache not in {"none", "merge", "separate"}:
+            raise ValueError("range_cache must be one of: 'none', 'merge', 'separate'.")
+        should_merge_cache = is_range_query and range_cache == "merge"
+        should_write_range = is_range_query and range_cache == "separate"
+
         cache_path = self.get_cache_path(symbol, timeframe)
         if not refresh:
             cached = self._read_cache(cache_path)
             if cached is not None:
                 logger.debug("Serving %s @ %s from cache", symbol, timeframe)
-                return cached.tail(max_points) if max_points else cached
-        return self.load_latest(symbol, timeframe, persist=True, max_points=max_points)
+                if is_range_query:
+                    start_bound = range_start or cached.index.min()
+                    end_bound = range_end or cached.index.max()
+                    subset = cached.loc[(cached.index >= start_bound) & (cached.index <= end_bound)]
+                    # If the cache fully covers the requested window, serve it directly.
+                    if not subset.empty and subset.index.min() <= start_bound and subset.index.max() >= end_bound:
+                        logger.info(
+                            "Serving %s @ %s range from cache | start=%s end=%s rows=%d",
+                            symbol,
+                            timeframe,
+                            start_bound,
+                            end_bound,
+                            len(subset),
+                        )
+                        if should_write_range:
+                            self._write_cache(self._get_range_cache_path(symbol, timeframe, start_bound, end_bound), subset)
+                        return subset
+                    logger.info(
+                        "Cache does not cover requested range for %s @ %s | want=%s..%s cache=%s..%s; fetching without persisting.",
+                        symbol,
+                        timeframe,
+                        start_bound,
+                        end_bound,
+                        cached.index.min(),
+                        cached.index.max(),
+                    )
+                else:
+                    return cached.tail(max_points) if max_points else cached
+
+        # Range queries should not overwrite cached CSVs; fetch as needed with persist=False.
+        if not is_range_query:
+            return self.load_latest(symbol, timeframe, persist=True, max_points=max_points)
+
+        # Fetch history ending at range_end (or latest), merge with cache in-memory, and slice.
+        # Persisting is controlled explicitly by ``range_cache`` to avoid accidental overwrites.
+        fetched = self.load_latest(
+            symbol,
+            timeframe,
+            persist=False,
+            max_points=max_points,
+            end_time=range_end,
+        )
+        cached = self._read_cache(cache_path)
+        if cached is not None and not cached.empty:
+            combined = pd.concat([cached, fetched]).sort_index()
+            combined = combined[~combined.index.duplicated(keep="last")]
+        else:
+            combined = fetched
+
+        if combined.empty:
+            raise ValueError(f"No data available for {symbol} @ {timeframe}.")
+
+        start_bound = range_start or combined.index.min()
+        end_bound = range_end or combined.index.max()
+        subset = combined.loc[(combined.index >= start_bound) & (combined.index <= end_bound)]
+        if should_merge_cache:
+            # Range-cache merge is intentionally append-only: we merge fetched data into the main cache.
+            # This is safe for historical backfills and does not rewrite the requested subset elsewhere.
+            self._write_cache(cache_path, combined)
+            logger.info(
+                "Merged range fetch into cache for %s @ %s | cache_rows=%d cache=%s",
+                symbol,
+                timeframe,
+                len(combined),
+                cache_path,
+            )
+        if should_write_range and not subset.empty:
+            range_path = self._get_range_cache_path(symbol, timeframe, start_bound, end_bound)
+            self._write_cache(range_path, subset)
+            logger.info(
+                "Persisted range cache for %s @ %s | rows=%d path=%s",
+                symbol,
+                timeframe,
+                len(subset),
+                range_path,
+            )
+        if subset.empty:
+            logger.warning(
+                "Range query returned no rows for %s @ %s | want=%s..%s available=%s..%s. "
+                "Likely causes: stale cache, start/end outside available history, or max_points too small.",
+                symbol,
+                timeframe,
+                start_bound,
+                end_bound,
+                combined.index.min(),
+                combined.index.max(),
+            )
+        else:
+            logger.info(
+                "Serving %s @ %s range (cache not updated) | start=%s end=%s rows=%d",
+                symbol,
+                timeframe,
+                start_bound,
+                end_bound,
+                len(subset),
+            )
+        return subset.copy()
 
     def load_latest(
         self,
@@ -76,6 +220,7 @@ class DataProvider:
         timeframe: str,
         persist: bool = True,
         max_points: Optional[int] = None,
+        end_time: Optional[pd.Timestamp] = None,
     ) -> pd.DataFrame:
         """
         Download the latest history from the upstream provider.
@@ -84,10 +229,16 @@ class DataProvider:
         stored history so repeated calls only append new data.
         """
         requested_points = max_points if max_points and max_points > 0 else None
+        api_symbol = self._resolve_api_symbol(symbol)
         if requested_points is not None and requested_points > self._config.output_size:
-            frame = self._fetch_batched_history(symbol, timeframe, requested_points)
+            frame = self._fetch_batched_history(api_symbol, timeframe, requested_points, end_time=end_time)
         else:
-            frame = self._client.fetch_ohlcv(symbol=symbol, interval=timeframe, output_size=requested_points)
+            frame = self._client.fetch_ohlcv(
+                symbol=api_symbol,
+                interval=timeframe,
+                output_size=requested_points,
+                end_time=end_time,
+            )
         cache_path = self.get_cache_path(symbol, timeframe)
         cached = self._read_cache(cache_path)
         if cached is not None:
@@ -104,11 +255,13 @@ class DataProvider:
         symbol: str,
         timeframe: str,
         max_points: int,
+        *,
+        end_time: Optional[pd.Timestamp] = None,
     ) -> pd.DataFrame:
         """Fetch extended history by issuing multiple Twelve Data requests."""
         remaining = max(max_points, 0)
         frames = []
-        end_time: Optional[pd.Timestamp] = None
+        cursor = end_time
         try:
             freq_offset = to_offset(timeframe)
         except ValueError:
@@ -120,7 +273,7 @@ class DataProvider:
                     symbol=symbol,
                     interval=timeframe,
                     output_size=batch_size,
-                    end_time=end_time,
+                    end_time=cursor,
                 )
             except TwelveDataError as exc:
                 # Twelve Data responds with "Data not found" once historical limits are reached.
@@ -135,9 +288,9 @@ class DataProvider:
             earliest = batch.index.min()
             if earliest is None or len(batch) == 0:
                 break
-            end_time = earliest - freq_offset
-            if end_time.tzinfo is None:
-                end_time = end_time.tz_localize("UTC")
+            cursor = earliest - freq_offset
+            if cursor.tzinfo is None:
+                cursor = cursor.tz_localize("UTC")
         if not frames:
             return pd.DataFrame()
         combined = pd.concat(frames).sort_index()
@@ -163,6 +316,30 @@ class DataProvider:
             serialisable.to_csv(path)
         except OSError as exc:
             logger.warning("Failed to write cache %s: %s", path, exc)
+
+    def _get_range_cache_path(
+        self,
+        symbol: str,
+        timeframe: str,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+    ) -> Path:
+        """Return a dedicated filename for range-query caching (does not affect main cache)."""
+        cache_dir = self.get_cache_path(symbol, timeframe).parent
+        try:
+            start_utc = pd.to_datetime(start, utc=True)
+        except Exception:  # noqa: BLE001
+            start_utc = pd.Timestamp(start).tz_localize("UTC")
+        try:
+            end_utc = pd.to_datetime(end, utc=True)
+        except Exception:  # noqa: BLE001
+            end_utc = pd.Timestamp(end).tz_localize("UTC")
+        suffix = (
+            f"{slugify(timeframe)}__range_"
+            f"{start_utc.strftime('%Y%m%dT%H%M%SZ')}_"
+            f"{end_utc.strftime('%Y%m%dT%H%M%SZ')}.csv"
+        )
+        return cache_dir / suffix
 
 
 __all__ = ["DataProvider"]

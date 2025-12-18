@@ -8,7 +8,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import torch
+try:  # torch is heavy; allow optional fallback
+    import torch
+
+    _TORCH_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    import pickle
+
+    torch = None  # type: ignore[assignment]
+    _TORCH_AVAILABLE = False
 
 
 @dataclass
@@ -45,11 +53,15 @@ class ModelStore:
         manifest_path = self.base_dir / f"{prefix}.json"
         payload_state = {
             "mean_class": f"{mean_model.__class__.__module__}.{mean_model.__class__.__qualname__}",
-            "mean_state": mean_model.state_dict(),
+            "mean_state": getattr(mean_model, "state_dict", lambda: {})(),
             "vol_class": f"{vol_model.__class__.__module__}.{vol_model.__class__.__qualname__}",
-            "vol_state": vol_model.state_dict(),
+            "vol_state": getattr(vol_model, "state_dict", lambda: {})(),
         }
-        torch.save(payload_state, model_path)
+        if _TORCH_AVAILABLE:
+            torch.save(payload_state, model_path)
+        else:  # pragma: no cover - lightweight fallback
+            with open(model_path, "wb") as handle:
+                pickle.dump(payload_state, handle)
 
         manifest = {
             "metadata": metadata,
@@ -97,7 +109,11 @@ class ModelStore:
 
         if model_path.exists():
             try:
-                stored_models = torch.load(model_path, map_location="cpu")
+                if _TORCH_AVAILABLE:
+                    stored_models = torch.load(model_path, map_location="cpu")
+                else:  # pragma: no cover
+                    with open(model_path, "rb") as handle:
+                        stored_models = pickle.load(handle)
                 mean_model = self._instantiate_from_state(
                     stored_models.get("mean_class"),
                     stored_models.get("mean_state"),

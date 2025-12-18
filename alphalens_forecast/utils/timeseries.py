@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from darts import TimeSeries
+
+try:  # Darts is heavy; defer optional dependency errors until use.
+    from darts import TimeSeries
+except ImportError:  # pragma: no cover - optional dependency
+    TimeSeries = None  # type: ignore[assignment]
 
 TIMEFRAME_FREQ_MAP = {
     "1min": "1min",
@@ -46,6 +50,8 @@ def build_timeseries(df: pd.DataFrame) -> TimeSeries:
     df:
         Dataframe with ``datetime`` and ``close`` columns.
     """
+    if TimeSeries is None:
+        raise ImportError("darts is required for build_timeseries; install it from requirements.txt")
     frame = _normalize_dataframe(df)
     return TimeSeries.from_dataframe(frame, time_col="datetime", value_cols="close")
 
@@ -68,6 +74,8 @@ def series_to_dataframe(series: pd.Series) -> pd.DataFrame:
 
 def timeseries_to_dataframe(series: TimeSeries, value_column: str) -> pd.DataFrame:
     """Convert a Darts ``TimeSeries`` back into a dataframe."""
+    if TimeSeries is None:
+        raise ImportError("darts is required for timeseries_to_dataframe; install it from requirements.txt")
     if hasattr(series, "pd_dataframe"):
         df = series.pd_dataframe()
     else:

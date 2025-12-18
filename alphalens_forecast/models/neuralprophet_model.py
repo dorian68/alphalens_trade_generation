@@ -1,6 +1,7 @@
 """NeuralProphet forecaster wrapper."""
 from __future__ import annotations
 
+import logging
 import json
 from pathlib import Path
 from typing import Optional
@@ -18,9 +19,11 @@ from pandas.tseries.frequencies import to_offset
 
 from alphalens_forecast.core.feature_engineering import to_neural_prophet_frame
 from alphalens_forecast.models.base import BaseForecaster
+from alphalens_forecast.models.dataloader_audit import log_dataloader_audit
 
 
 _SAFE_GLOBALS_REGISTERED = False
+logger = logging.getLogger(__name__)
 
 
 def _ensure_neuralprophet_safe_globals() -> None:
@@ -46,12 +49,17 @@ def _ensure_neuralprophet_safe_globals() -> None:
 class NeuralProphetForecaster(BaseForecaster):
     """Wrapper around NeuralProphet configured for intraday forecasting."""
 
-    def __init__(self) -> None:
-        super().__init__(name="NeuralProphet")
+    def __init__(self, device: str = "cpu") -> None:
+        super().__init__(name="NeuralProphet", device=device)
         self._model: Optional[NeuralProphet] = None
         self._train_frame: Optional[pd.DataFrame] = None
         self._freq: Optional[str] = None
         self._progress: str | None = None
+        self._trainer_config = None
+        self._batch_size = 16
+        if self.device.lower().startswith("cuda"):
+            # Centralized device handling: let Lightning manage GPU placement.
+            self._trainer_config = {"accelerator": "gpu", "devices": 1}
 
     def __setstate__(self, state: dict[str, object]) -> None:
         """
@@ -61,8 +69,17 @@ class NeuralProphetForecaster(BaseForecaster):
         so we provision the default used by current versions during load.
         """
         self.__dict__.update(state)
+        if "device" not in state:
+            self.device = "cpu"
         if "_progress" not in state:
             self._progress = None
+        if "_batch_size" not in state:
+            self._batch_size = 16
+        if "_trainer_config" not in state:
+            self._trainer_config = None
+            if getattr(self, "device", "cpu").lower().startswith("cuda"):
+                # Centralized device handling for restored checkpoints.
+                self._trainer_config = {"accelerator": "gpu", "devices": 1}
 
     def _progress_display(self) -> str | None:
         """
@@ -89,6 +106,9 @@ class NeuralProphetForecaster(BaseForecaster):
             freq = to_offset(deltas.mode().iloc[0]).freqstr
         self._freq = freq
 
+        kwargs = {}
+        if self._trainer_config is not None:
+            kwargs["trainer_config"] = self._trainer_config
         model = NeuralProphet(
             n_lags=30,
             n_changepoints=20,
@@ -98,12 +118,33 @@ class NeuralProphetForecaster(BaseForecaster):
             daily_seasonality=True,
             learning_rate=0.001,
             epochs=20,
-            batch_size=16,
+            batch_size=self._batch_size,
+            **kwargs,
         )
 
         self._model = model
         self._train_frame = frame
-        self._model.fit(frame, freq=freq, progress=self._progress_display())
+        num_workers = 0
+        config = getattr(self, "_dataloader_config", None)
+        if config is not None:
+            num_workers = int(getattr(config, "num_workers", 0))
+        if num_workers > 0:
+            logger.info("Using DataLoader workers: num_workers=%s", num_workers)
+            self._model.fit(
+                frame,
+                freq=freq,
+                progress=self._progress_display(),
+                num_workers=num_workers,
+            )
+        else:
+            self._model.fit(frame, freq=freq, progress=self._progress_display())
+        log_dataloader_audit(
+            model_name=self.name,
+            device=self.device,
+            batch_size=self._batch_size,
+            model=self._model,
+            source_hint="NeuralProphet internal",
+        )
 
     def forecast(
         self,

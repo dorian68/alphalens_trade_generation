@@ -286,9 +286,9 @@ from alphalens_forecast.evaluation import load_model, test_model, time_split, pl
 provider = DataProvider()
 # frame = provider.load_data("EUR/USD", "15min", refresh=True, max_points=500000)
 
-PROJECT_ROOT = Path("/home/ubuntu/.vscode-server/projects/alphalens_forecast/ALPHALENS_FORECAST")
+PROJECT_ROOT = Path("C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
 router = ModelRouter(PROJECT_ROOT / "models")
-frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/EUR_USD/30min.csv", parse_dates=["datetime"]).set_index("datetime")
+frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/EUR_USD/15min.csv", parse_dates=["datetime"]).set_index("datetime")
 # frame = frame.tail(20000)
 # frame = df_btc
 
@@ -302,11 +302,11 @@ close_series = frame["close"].dropna()
 print("---- Training just started ----")
 
 symbol = "EUR/USD"
-for timeframe in ("15min","30min", "1h", "4h"):
+for timeframe in ("15min",): #"30min", "1h", "4h"):
     # train_nhits(symbol, timeframe, model_router=router)
-    # train_neuralprophet(symbol, timeframe, model_router=router, price_frame=frame)
+    train_neuralprophet(symbol, timeframe, model_router=router, price_frame=frame)
     # train_prophet(symbol, timeframe, model_router=router)
-    train_egarch(symbol, timeframe, model_router=router, price_frame=frame)
+    # train_egarch(symbol, timeframe, model_router=router, price_frame=frame)
 
 print("---- Training just ended ----")
 
@@ -325,6 +325,12 @@ print(result["metrics"])
 
 
 # %%
+#**********************************************************************************
+#*                                                                                *
+#*                        TEST MEAN MODEL NEURALPROPHET                           *
+#*                                                                                *
+#**********************************************************************************
+
 import importlib
 import sys
 from pathlib import Path
@@ -336,22 +342,23 @@ sys.path.append("/home/ubuntu/.vscode-server/projects/alphalens_forecast/ALPHALE
 from alphalens_forecast.evaluation import load_model, test_model, time_split, plot_forecast_vs_real
 from alphalens_forecast.data import DataProvider
 
-PROJECT_ROOT = Path("/home/ubuntu/.vscode-server/projects/alphalens_forecast/ALPHALENS_FORECAST")
+PROJECT_ROOT = Path(r"C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
 
-frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/XLM_USD/30min.csv", parse_dates=["datetime"]).set_index("datetime")
+frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/BTC_USD/15min.csv", parse_dates=["datetime"]).set_index("datetime")
 close_series = frame["close"].dropna()
 
 # provider = DataProvider()
 # price_frame = provider.load_data("EUR/USD", "15min")
 # close_series = price_frame["close"].dropna()
 
+roll_steps = 24
 train, _, test = time_split(close_series)
 model = load_model("neuralprophet", "EUR/USD", "15min")
-preds = test_model("neuralprophet", model, test, "15min",train_series=train,rolling_steps=2000)
-plot_forecast_vs_real(preds, test[:2000],show_metrics=True,show_confidence=True)
+preds = test_model("neuralprophet", model, test, "15min",train_series=train,rolling_steps=roll_steps)
+plot_forecast_vs_real(preds, test[:roll_steps],show_metrics=True,show_confidence=True)
 
 # %%
-plot_forecast_vs_real(preds, test[:2000],show_metrics=True,show_confidence=True)
+plot_forecast_vs_real(preds, test[:roll_steps],show_metrics=True,show_confidence=True)
 
 
 # %%

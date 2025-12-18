@@ -126,9 +126,7 @@ class _VolatilityEngine:
         last_sigma = self._last_sigma if np.isfinite(self._last_sigma) else self._residual_std
         last_sigma = max(last_sigma, VOL_FLOOR)
         attempts: Iterable[Dict[str, Optional[str]]] = (
-            {"name": "analytic", "method": None},
             {"name": "simulation", "method": "simulation"},
-            {"name": "bootstrap", "method": "bootstrap"},
         )
 
         for attempt in attempts:

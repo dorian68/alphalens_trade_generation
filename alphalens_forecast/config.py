@@ -86,12 +86,22 @@ class RiskConfig:
 
 
 @dataclass
+class TrainingConfig:
+    """Runtime settings for Torch-backed training data loading."""
+
+    num_workers: int = _env_int("TRAIN_NUM_WORKERS", 0)
+    pin_memory: bool = _env_bool("TRAIN_PIN_MEMORY", False)
+    persistent_workers: bool = _env_bool("TRAIN_PERSISTENT_WORKERS", False)
+
+
+@dataclass
 class AppConfig:
     """Top-level configuration container."""
 
     twelve_data: TwelveDataConfig = field(default_factory=TwelveDataConfig)
     monte_carlo: MonteCarloConfig = field(default_factory=MonteCarloConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
+    training: TrainingConfig = field(default_factory=TrainingConfig)
     default_timeframe: str = os.getenv("DEFAULT_TIMEFRAME", "15min")
     torch_device: str = os.getenv("TORCH_DEVICE", "cpu")
 
@@ -166,6 +176,7 @@ __all__ = [
     "TwelveDataConfig",
     "MonteCarloConfig",
     "RiskConfig",
+    "TrainingConfig",
     "get_instrument_universe",
     "get_config",
 ]

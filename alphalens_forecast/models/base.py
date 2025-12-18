@@ -14,8 +14,19 @@ class BaseForecaster(ABC):
 
     name: str
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, device: str = "cpu") -> None:
         self.name = name
+        # Device is an execution concern; non-Torch models safely ignore it.
+        self.device = device
+        self._dataloader_config = None
+
+    def set_device(self, device: str) -> None:
+        """Update the runtime device without altering model behavior."""
+        self.device = device
+
+    def set_dataloader_config(self, config) -> None:
+        """Store optional DataLoader config for Torch-backed models."""
+        self._dataloader_config = config
 
     @abstractmethod
     def fit(

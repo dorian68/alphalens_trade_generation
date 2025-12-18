@@ -36,7 +36,7 @@ from alphalens_forecast.models import (
     NHiTSForecaster,
 )
 from alphalens_forecast.backtesting import TrajectoryRecorder
-from alphalens_forecast.models.selection import select_model_type
+from alphalens_forecast.models.selection import resolve_device, select_model_type
 from alphalens_forecast.training import MEAN_TRAINERS, train_egarch
 from alphalens_forecast.utils.model_store import ModelStore, StoredArtifacts
 from alphalens_forecast.utils.text import slugify
@@ -174,6 +174,7 @@ class OrchestrationResult:
     vol_model: Optional[EGARCHVolModel]
     garch_forecast: Optional[EGARCHForecast]
     metadata: Dict[str, Any]
+    predictions: Dict[str, pd.DataFrame] = field(default_factory=dict)
     data_hash: Optional[str] = None
     as_of: Optional[str] = None
     used_cached_artifacts: bool = False
@@ -181,6 +182,11 @@ class OrchestrationResult:
     run_timestamp_iso: Optional[str] = None
     run_timestamp_slug: Optional[str] = None
     trajectories: List[Dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def volatility(self) -> Optional[EGARCHForecast]:
+        """Backwards-compatible alias for volatility forecasts."""
+        return self.garch_forecast
 
 
 class _SeriesDataProvider:
@@ -283,6 +289,7 @@ class ForecastEngine:
             raise ValueError(f"No pandas frequency mapping for timeframe '{timeframe}'.")
 
         model_type = select_model_type(timeframe)
+        device = resolve_device(self._config.torch_device, model_type)
         mean_model = mean_model_override
         if mean_model is not None:
             durations["mean_model_fit_seconds"] = 0.0
@@ -293,7 +300,12 @@ class ForecastEngine:
                 timeframe,
             )
         else:
-            mean_model = self._model_router.load_model(model_type, symbol, timeframe)
+            mean_model = self._model_router.load_model(
+                model_type,
+                symbol,
+                timeframe,
+                device=device,
+            )
             if isinstance(mean_model, NHiTSForecaster) and mean_model.requires_retraining():
                 logger.warning(
                     "Cached NHITS model for %s @ %s was trained with covariates; retraining.",
@@ -311,6 +323,8 @@ class ForecastEngine:
                     price_frame=price_frame,
                     data_provider=self._data_provider,
                     model_router=self._model_router,
+                    device=device,
+                    training_config=self._config.training,
                 )
                 durations["mean_model_fit_seconds"] = time.perf_counter() - fit_start
             else:
@@ -374,6 +388,7 @@ class ForecastEngine:
 
         risk_engine = RiskEngine(self._config)
         horizon_payload: List[HorizonForecast] = []
+        mean_forecasts: Dict[str, pd.DataFrame] = {}
         horizon_iterable = list(zip(horizons, horizon_steps))
         logger.info("Processing %d horizons", len(horizon_iterable))
         forecast_loop_start = time.perf_counter()
@@ -391,9 +406,11 @@ class ForecastEngine:
             if "ds" in forecast_df.columns:
                 forecast_df = forecast_df.set_index("ds")
 
+            horizon_label = f"{horizon_hours}h"
+            mean_forecasts[horizon_label] = forecast_df.copy()
             if trajectory_recorder is not None:
                 trajectory_recorder.add_from_dataframe(
-                    horizon_label=f"{horizon_hours}h",
+                    horizon_label=horizon_label,
                     forecast_df=forecast_df,
                 )
 
@@ -530,6 +547,7 @@ class ForecastEngine:
             vol_model=garch,
             garch_forecast=garch_forecast,
             metadata=metadata,
+            predictions=mean_forecasts,
             data_hash=data_hash,
             as_of=as_of,
             durations=durations,
@@ -574,6 +592,7 @@ class ForecastEngine:
             vol_model=stored.vol_model,
             garch_forecast=None,
             metadata=stored.metadata,
+            predictions={},
             data_hash=data_hash,
             as_of=stored.metadata.get("as_of", format_timestamp(price_frame.index[-1])),
             used_cached_artifacts=True,

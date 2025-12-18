@@ -44,6 +44,10 @@ def save_model_safely(
             actual = save_method(target)
             saved_path = Path(actual) if actual is not None else target
             return saved_path, "native"
+        except NotImplementedError:
+            # Some forecasters inherit BaseForecaster.save without implementing it.
+            # Fall back to state_dict without changing training behavior.
+            pass
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "Failed to save model for %s model for %s @ %s: %s",
@@ -196,7 +200,14 @@ class ModelRouter:
             storage_format,
         )
 
-    def load_model(self, model_type: str, symbol: str, timeframe: str) -> Optional[Any]:
+    def load_model(
+        self,
+        model_type: str,
+        symbol: str,
+        timeframe: str,
+        *,
+        device: Optional[str] = None,
+    ) -> Optional[Any]:
         """Return the model if it exists, otherwise None."""
         model_dir = self.get_model_dir(model_type, symbol, timeframe)
         manifest_path = self.get_metadata_path(model_type, symbol, timeframe)
@@ -215,7 +226,12 @@ class ModelRouter:
         if storage_format and model_file and class_path:
             artifact_path = model_dir / model_file
             try:
-                model = self._load_from_artifact(class_path, storage_format, artifact_path)
+                model = self._load_from_artifact(
+                    class_path,
+                    storage_format,
+                    artifact_path,
+                    device=device,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "Failed to load %s model for %s @ %s via %s: %s",
@@ -246,6 +262,9 @@ class ModelRouter:
                 return None
 
         logger.info("Loaded %s model for %s @ %s", model_type, symbol, timeframe)
+        if hasattr(model, "set_device") and device:
+            # Device is an execution concern; set it centrally after load.
+            model.set_device(device)
         if hasattr(model, "load_artifacts"):
             try:
                 model.load_artifacts(model_dir)
@@ -259,16 +278,28 @@ class ModelRouter:
                 )
         return model
 
-    def _load_from_artifact(self, class_path: str, storage_format: str, artifact_path: Path) -> Any:
+    def _load_from_artifact(
+        self,
+        class_path: str,
+        storage_format: str,
+        artifact_path: Path,
+        *,
+        device: Optional[str] = None,
+    ) -> Any:
         cls = _resolve_class(class_path)
         if storage_format == "native":
-            return cls.load_native(artifact_path)
+            instance = cls.load_native(artifact_path)
+            if hasattr(instance, "set_device") and device:
+                instance.set_device(device)
+            return instance
         if storage_format == "state_dict":
             state = torch.load(artifact_path, map_location="cpu")
             instance = cls()
             if not hasattr(instance, "load_state_dict"):
                 raise AttributeError(f"{class_path} lacks load_state_dict()")
             instance.load_state_dict(state)
+            if hasattr(instance, "set_device") and device:
+                instance.set_device(device)
             return instance
         raise ValueError(f"Unsupported storage format '{storage_format}' for {class_path}")
 

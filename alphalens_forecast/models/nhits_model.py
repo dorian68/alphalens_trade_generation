@@ -15,6 +15,7 @@ from torch.optim.adam import Adam
 from torchmetrics.collections import MetricCollection
 
 from alphalens_forecast.models.base import BaseForecaster
+from alphalens_forecast.models.dataloader_audit import log_dataloader_audit
 from alphalens_forecast.utils.scaling import ScalerWrapper
 from alphalens_forecast.utils.timeseries import (
     build_timeseries,
@@ -44,12 +45,17 @@ class NHiTSForecaster(BaseForecaster):
 
     MODEL_VERSION = 3
 
-    def __init__(self, input_chunk_length: int = 48, output_chunk_length: int = 24) -> None:
-        super().__init__(name="NHITS")
+    def __init__(
+        self,
+        input_chunk_length: int = 48,
+        output_chunk_length: int = 24,
+        device: str = "cpu",
+    ) -> None:
+        super().__init__(name="NHITS", device=device)
         self._input_chunk_length = input_chunk_length
         self._output_chunk_length = output_chunk_length
-        self._n_epochs = 300
-        self._batch_size = 32
+        self._n_epochs = 100
+        self._batch_size = 10000
         self._dropout = 0.1
         self._random_state = 42
         self._learning_rate = 1e-3
@@ -63,6 +69,13 @@ class NHiTSForecaster(BaseForecaster):
 
     def _build_backend(self) -> NHiTSModel:
         """Instantiate the underlying Darts model with stored hyperparameters."""
+        pl_trainer_kwargs = None
+        if self.device.lower().startswith("cuda"):
+            # Centralized device handling: let Lightning manage GPU placement.
+            pl_trainer_kwargs = {"accelerator": "gpu", "devices": 1}
+        kwargs = {}
+        if pl_trainer_kwargs is not None:
+            kwargs["pl_trainer_kwargs"] = pl_trainer_kwargs
         return NHiTSModel(
             input_chunk_length=self._input_chunk_length,
             output_chunk_length=self._output_chunk_length,
@@ -72,11 +85,29 @@ class NHiTSForecaster(BaseForecaster):
             random_state=self._random_state,
             loss_fn=SmoothL1Loss(),
             optimizer_kwargs={"lr": self._learning_rate},
+            **kwargs,
         )
 
     def _build_target_series(self, target: pd.Series) -> TimeSeries:
         frame = series_to_dataframe(target)
         return build_timeseries(frame)
+
+    def _dataloader_kwargs(self) -> Optional[dict]:
+        config = getattr(self, "_dataloader_config", None)
+        if config is None or getattr(config, "num_workers", 0) <= 0:
+            return None
+        kwargs = {"num_workers": int(config.num_workers)}
+        if getattr(config, "pin_memory", False):
+            kwargs["pin_memory"] = True
+        if getattr(config, "persistent_workers", False):
+            kwargs["persistent_workers"] = True
+        logger.info(
+            "Using DataLoader workers: num_workers=%s, pin_memory=%s, persistent_workers=%s",
+            kwargs.get("num_workers"),
+            kwargs.get("pin_memory", False),
+            kwargs.get("persistent_workers", False),
+        )
+        return kwargs
 
     def fit(
         self,
@@ -96,10 +127,25 @@ class NHiTSForecaster(BaseForecaster):
         self._scaler.fit_from_series(series)
         logger.info("NHITS scaler fitted | mean=%.6f std=%.6f", self._scaler.mean_, self._scaler.std_)
         scaled_series = self._scaler.transform(series).astype(np.float32)
-        self._model.fit(scaled_series)
+        dataloader_kwargs = self._dataloader_kwargs()
+        if dataloader_kwargs:
+            try:
+                self._model.fit(scaled_series, dataloader_kwargs=dataloader_kwargs)
+            except TypeError:
+                logger.warning("NHITS dataloader_kwargs unsupported; falling back to defaults.")
+                self._model.fit(scaled_series)
+        else:
+            self._model.fit(scaled_series)
         self._series = series.astype(np.float32)
         self._scaled_series = scaled_series
         self._schema_version = self.MODEL_VERSION
+        log_dataloader_audit(
+            model_name=self.name,
+            device=self.device,
+            batch_size=self._batch_size,
+            model=self._model,
+            source_hint="Darts internal",
+        )
 
     def requires_retraining(self) -> bool:
         """Return True if this checkpoint predates the univariate upgrade."""
@@ -196,6 +242,8 @@ class NHiTSForecaster(BaseForecaster):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        if "device" not in self.__dict__:
+            self.device = "cpu"
         defaults = {
             "_input_chunk_length": 48,
             "_output_chunk_length": 24,

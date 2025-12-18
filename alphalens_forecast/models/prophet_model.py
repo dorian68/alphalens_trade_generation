@@ -13,8 +13,8 @@ from alphalens_forecast.models.base import BaseForecaster
 class ProphetForecaster(BaseForecaster):
     """Wrapper around Facebook Prophet with sensible defaults."""
 
-    def __init__(self) -> None:
-        super().__init__(name="Prophet")
+    def __init__(self, device: str = "cpu") -> None:
+        super().__init__(name="Prophet", device=device)
         self._model: Optional[Prophet] = None
         self._regressor_columns: list[str] = []
 

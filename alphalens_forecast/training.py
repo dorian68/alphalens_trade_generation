@@ -15,8 +15,8 @@ from alphalens_forecast.data import DataProvider
 from alphalens_forecast.models import EGARCHVolModel
 from alphalens_forecast.models.base import BaseForecaster
 from alphalens_forecast.models.router import ModelRouter
+from alphalens_forecast.config import TrainingConfig
 from alphalens_forecast.models.selection import instantiate_model
-from alphalens_forecast.models.tft_model import TFTForecaster
 from alphalens_forecast.training_schedule import TRAINING_FREQUENCIES
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,8 @@ def train_mean_model(
     price_frame: Optional[pd.DataFrame] = None,
     data_provider: Optional[DataProvider] = None,
     model_router: Optional[ModelRouter] = None,
+    device: Optional[str] = None,
+    training_config: Optional[TrainingConfig] = None,
 ) -> BaseForecaster:
     """Shared training loop for Prophet/NeuralProphet/NHiTS backends."""
     frame_override = price_frame
@@ -102,7 +104,9 @@ def train_mean_model(
     router = _default_router(model_router)
     frame = frame_override if frame_override is not None else provider.load_data(symbol, timeframe)
     features = prepare_features(frame)
-    model = instantiate_model(model_type)
+    model = instantiate_model(model_type, device=device)
+    if training_config is not None:
+        model.set_dataloader_config(training_config)
     print(f"Training model...")
     model.fit(features.target, features.regressors)
     print(f"Model trained")
@@ -124,6 +128,8 @@ def train_nhits(
     price_frame: Optional[pd.DataFrame] = None,
     data_provider: Optional[DataProvider] = None,
     model_router: Optional[ModelRouter] = None,
+    device: Optional[str] = None,
+    training_config: Optional[TrainingConfig] = None,
 ) -> BaseForecaster:
     """Train/persist an N-HiTS mean model."""
     return train_mean_model(
@@ -133,6 +139,8 @@ def train_nhits(
         price_frame=price_frame,
         data_provider=data_provider,
         model_router=model_router,
+        device=device,
+        training_config=training_config,
     )
 
 
@@ -143,6 +151,8 @@ def train_neuralprophet(
     price_frame: Optional[pd.DataFrame] = None,
     data_provider: Optional[DataProvider] = None,
     model_router: Optional[ModelRouter] = None,
+    device: Optional[str] = None,
+    training_config: Optional[TrainingConfig] = None,
 ) -> BaseForecaster:
     """Train/persist a NeuralProphet mean model."""
     return train_mean_model(
@@ -152,6 +162,8 @@ def train_neuralprophet(
         price_frame=price_frame,
         data_provider=data_provider,
         model_router=model_router,
+        device=device,
+        training_config=training_config,
     )
 
 
@@ -162,6 +174,8 @@ def train_prophet(
     price_frame: Optional[pd.DataFrame] = None,
     data_provider: Optional[DataProvider] = None,
     model_router: Optional[ModelRouter] = None,
+    device: Optional[str] = None,
+    training_config: Optional[TrainingConfig] = None,
 ) -> BaseForecaster:
     """Train/persist a Prophet mean model."""
     return train_mean_model(
@@ -171,6 +185,8 @@ def train_prophet(
         price_frame=price_frame,
         data_provider=data_provider,
         model_router=model_router,
+        device=device,
+        training_config=training_config,
     )
 
 
@@ -181,13 +197,17 @@ def train_tft(
     price_frame: Optional[pd.DataFrame] = None,
     data_provider: Optional[DataProvider] = None,
     model_router: Optional[ModelRouter] = None,
+    device: Optional[str] = None,
+    training_config: Optional[TrainingConfig] = None,
 ) -> BaseForecaster:
     """Train/persist a TFT sequence model."""
     provider = _default_provider(data_provider)
     router = _default_router(model_router)
     frame = price_frame if price_frame is not None else provider.load_data(symbol, timeframe)
     features = prepare_features(frame)
-    model = TFTForecaster()
+    model = instantiate_model("tft", device=device)
+    if training_config is not None:
+        model.set_dataloader_config(training_config)
     model.fit(features.target, features.regressors)
     metadata = {
         "n_observations": len(frame),
