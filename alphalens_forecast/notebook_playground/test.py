@@ -274,7 +274,7 @@ from pathlib import Path
 import pandas as pd
 
 # importlib.reload(ts_utils)
-sys.path.append("/home/ubuntu/.vscode-server/projects/alphalens_forecast/ALPHALENS_FORECAST")
+sys.path.append("C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -302,11 +302,11 @@ close_series = frame["close"].dropna()
 print("---- Training just started ----")
 
 symbol = "EUR/USD"
-for timeframe in ("15min",): #"30min", "1h", "4h"):
+for timeframe in ("15min","30min", "1h", "4h"):
     # train_nhits(symbol, timeframe, model_router=router)
     train_neuralprophet(symbol, timeframe, model_router=router, price_frame=frame)
     # train_prophet(symbol, timeframe, model_router=router)
-    # train_egarch(symbol, timeframe, model_router=router, price_frame=frame)
+    train_egarch(symbol, timeframe, model_router=router, price_frame=frame)
 
 print("---- Training just ended ----")
 
@@ -337,7 +337,8 @@ from pathlib import Path
 import pandas as pd
 
 # importlib.reload(ts_utils)
-sys.path.append("/home/ubuntu/.vscode-server/projects/alphalens_forecast/ALPHALENS_FORECAST")
+sys.path.append(r"C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
+
 
 from alphalens_forecast.evaluation import load_model, test_model, time_split, plot_forecast_vs_real
 from alphalens_forecast.data import DataProvider
@@ -351,10 +352,10 @@ close_series = frame["close"].dropna()
 # price_frame = provider.load_data("EUR/USD", "15min")
 # close_series = price_frame["close"].dropna()
 
-roll_steps = 24
+roll_steps = 240
 train, _, test = time_split(close_series)
-model = load_model("neuralprophet", "EUR/USD", "15min")
-preds = test_model("neuralprophet", model, test, "15min",train_series=train,rolling_steps=roll_steps)
+model = load_model("nhits", "EUR/USD", "15min")
+preds = test_model("nhits", model, test, "15min",train_series=train,rolling_steps=roll_steps)
 plot_forecast_vs_real(preds, test[:roll_steps],show_metrics=True,show_confidence=True)
 
 # %%

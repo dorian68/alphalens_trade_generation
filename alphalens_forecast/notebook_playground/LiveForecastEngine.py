@@ -23,7 +23,7 @@ engine = ForecastEngine(config=config, data_provider=data_provider, model_router
 result = engine.forecast(
     symbol="EUR/USD",
     timeframe="15min",
-    horizons=[0.25, 0.5, 1],
+    horizons=[4, 6, 8],
     paths=config.monte_carlo.paths,
     use_montecarlo=config.monte_carlo.use_montecarlo,
     show_progress=False,
@@ -31,8 +31,11 @@ result = engine.forecast(
 
 
 # 4. Inspect the payload
+print("1-step ahead forecasts:")
 print(result.payload)          # TP/SL, quantiles, probabilities
+print("2-step ahead forecasts:")
 print(result.predictions)      # mean-model forecast series
+print("3-step ahead forecasts:")
 print(result.volatility.sigma) # GARCH sigma path
 
 # 5. (optional) Visualize the forecast
@@ -118,10 +121,10 @@ print(df_real.shape, df_real.index.min(), df_real.index.max())
 #*                                                                                *
 #**********************************************************************************
 
-plt.plot(df_real.index, df_real['close'], label='Real Close Price', color='blue')
-plt.plot(df_preds.index, df_preds["4h"], label='Forecast Horizon 4', color='orange')
+# plt.plot(df_real.index, df_real['close'], label='Real Close Price', color='blue')
+# plt.plot(df_preds.index, df_preds["4h"], label='Forecast Horizon 4', color='orange')
 plt.plot(df_preds.index, df_preds["6h"], label='Forecast Horizon 6', color='green')
-plt.plot(df_preds.index, df_preds["8h"], label='Forecast Horizon 8', color ='red')
+# plt.plot(df_preds.index, df_preds["8h"], label='Forecast Horizon 8', color ='red')
 plt.title("Live Forecast vs Real Data for EUR/USD (15min)")
 
 

@@ -61,6 +61,36 @@ FREQ_MAP: Dict[str, str] = {
 }
 
 
+def _trim_to_complete_candle(frame: pd.DataFrame, timeframe: str) -> Tuple[pd.DataFrame, Optional[pd.Timestamp], bool]:
+    """
+    Ensure the last row corresponds to a fully-formed candle.
+
+    Returns the (possibly trimmed) frame, the last complete timestamp, and a flag indicating
+    whether a row was dropped. This avoids using an in-progress candle as the live forecast origin.
+    """
+    if frame.empty:
+        return frame, None, False
+    freq = FREQ_MAP.get(timeframe.lower())
+    if not freq:
+        return frame, frame.index[-1], False
+    try:
+        offset = pd.tseries.frequencies.to_offset(freq)
+    except Exception:  # noqa: BLE001
+        return frame, frame.index[-1], False
+
+    last_ts = frame.index[-1]
+    if last_ts.tzinfo is None:
+        last_ts = last_ts.tz_localize(timezone.utc)
+    now_utc = datetime.now(timezone.utc)
+    # If we are still within the current candle interval, drop the last row to avoid lookahead.
+    if now_utc < last_ts + offset:
+        trimmed = frame.iloc[:-1].copy()
+        if not trimmed.empty:
+            return trimmed, trimmed.index[-1], True
+        return trimmed, None, True
+    return frame, frame.index[-1], False
+
+
 def compute_dataframe_hash(frame: pd.DataFrame) -> str:
     """Compute a deterministic hash of the price frame."""
     hashed = pd.util.hash_pandas_object(frame, index=True).values
@@ -182,6 +212,7 @@ class OrchestrationResult:
     run_timestamp_iso: Optional[str] = None
     run_timestamp_slug: Optional[str] = None
     trajectories: List[Dict[str, Any]] = field(default_factory=list)
+    rolling_predictions: Dict[str, pd.Series] = field(default_factory=dict)
 
     @property
     def volatility(self) -> Optional[EGARCHForecast]:
@@ -228,6 +259,8 @@ class ForecastEngine:
         price_frame: Optional[pd.DataFrame] = None,
         mean_model_override: Optional[BaseForecaster] = None,
         vol_model_override: Optional[EGARCHVolModel] = None,
+        rolling_eval: bool = False,
+        rolling_steps: Optional[int] = None,
     ) -> OrchestrationResult:
         """Run the full pipeline: data -> mean model -> vol -> Monte Carlo."""
         run_start = time.perf_counter()
@@ -249,6 +282,16 @@ class ForecastEngine:
         else:
             price_frame = frame_override
             source_label = "provided"
+        price_frame, last_complete_ts, dropped_tail = _trim_to_complete_candle(price_frame, timeframe)
+        if dropped_tail:
+            logger.info(
+                "Dropped in-progress candle for %s @ %s; using %s as last complete bar.",
+                symbol,
+                timeframe,
+                format_timestamp(last_complete_ts) if last_complete_ts is not None else "n/a",
+            )
+        if price_frame.empty:
+            raise ValueError(f"No complete candles available for {symbol} @ {timeframe}.")
         durations["fetch_seconds"] = time.perf_counter() - fetch_start
         logger.info(
             "%s %d rows in %.2fs | first=%s | last=%s",
@@ -282,7 +325,8 @@ class ForecastEngine:
         if last_price <= 0:
             raise ValueError("Close price must be positive to compute log transforms.")
         last_log_price = float(np.log(last_price))
-        as_of = format_timestamp(price_frame.index[-1])
+        as_of_ts = last_complete_ts or price_frame.index[-1]
+        as_of = format_timestamp(as_of_ts)
 
         freq = FREQ_MAP.get(timeframe.lower())
         if freq is None:
@@ -389,7 +433,47 @@ class ForecastEngine:
         risk_engine = RiskEngine(self._config)
         horizon_payload: List[HorizonForecast] = []
         mean_forecasts: Dict[str, pd.DataFrame] = {}
+        rolling_predictions: Dict[str, pd.Series] = {}
+        rolling_summary: Dict[str, Any] = {}
         horizon_iterable = list(zip(horizons, horizon_steps))
+        if rolling_eval:
+            steps_eval = rolling_steps or 0
+            if steps_eval <= 0 or steps_eval >= len(target_series):
+                logger.warning(
+                    "Rolling evaluation skipped (requested steps=%s, available history=%s).",
+                    steps_eval,
+                    len(target_series),
+                )
+            else:
+                try:
+                    # Imported lazily to avoid circular imports at module load time.
+                    from alphalens_forecast.evaluation import rolling_forecast  # type: ignore
+
+                    train_series = target_series.iloc[:-steps_eval]
+                    test_series = target_series.iloc[-steps_eval:]
+                    for horizon_hours, steps in horizon_iterable:
+                        horizon_label = f"{horizon_hours}h"
+                        roll_values = rolling_forecast(
+                            mean_model,
+                            train_series,
+                            test_series,
+                            timeframe,
+                            horizon=steps,
+                            max_steps=steps_eval,
+                        )
+                        target_index = test_series.sort_index().index[: len(roll_values)]
+                        rolling_predictions[horizon_label] = pd.Series(
+                            roll_values, index=target_index, name="prediction"
+                        )
+                    rolling_summary = {
+                        "enabled": True,
+                        "steps": steps_eval,
+                        "train_rows": len(train_series),
+                        "test_rows": len(test_series),
+                        "horizons": [f"{h}h" for h, _ in horizon_iterable],
+                    }
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Rolling evaluation failed; continuing with bulk forecast. (%s)", exc)
         logger.info("Processing %d horizons", len(horizon_iterable))
         forecast_loop_start = time.perf_counter()
         for horizon_hours, steps in tqdm(
@@ -530,10 +614,12 @@ class ForecastEngine:
             "environment": {
                 "python": platform.python_version(),
                 "numpy": np.__version__,
-                "pandas": pd.__version__,
-                "platform": platform.platform(),
-            },
-        }
+            "pandas": pd.__version__,
+            "platform": platform.platform(),
+        },
+    }
+        if rolling_summary:
+            metadata["rolling_eval"] = rolling_summary
         metadata["residual_std"] = float(residuals.std(ddof=0))
         metadata["last_price"] = last_price
         metadata["sigma_path_min"] = float(sigma_path.min())
@@ -554,6 +640,7 @@ class ForecastEngine:
             run_timestamp_iso=run_timestamp_iso,
             run_timestamp_slug=run_timestamp_slug,
             trajectories=trajectory_recorder.to_payload() if trajectory_recorder is not None else [],
+            rolling_predictions=rolling_predictions,
         )
 
     def _reuse_from_store(
@@ -599,6 +686,7 @@ class ForecastEngine:
             durations=reuse_durations,
             run_timestamp_iso=stored.metadata.get("timestamp", run_timestamp_iso),
             run_timestamp_slug=stored.metadata.get("timestamp_slug", run_timestamp_slug),
+            rolling_predictions={},
         )
 
 

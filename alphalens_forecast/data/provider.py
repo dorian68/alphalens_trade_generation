@@ -32,12 +32,14 @@ class DataProvider:
         config: Optional[TwelveDataConfig] = None,
         cache_dir: Optional[Path] = None,
         client: Optional[TwelveDataClient] = None,
+        auto_refresh: bool = False,
     ) -> None:
         self._config = config or TwelveDataConfig()
         default_cache = cache_dir or _DEFAULT_CACHE_DIR
         self._cache_dir = Path(default_cache).resolve()
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._client = client or TwelveDataClient(self._config)
+        self._auto_refresh = auto_refresh
 
     def get_cache_path(self, symbol: str, timeframe: str) -> Path:
         """Return the cache path for a (symbol, timeframe) pair."""
@@ -69,6 +71,82 @@ class DataProvider:
         normalized = f"{base}/{quote}"
         logger.debug("Normalized symbol for API: %s -> %s", raw, normalized)
         return normalized
+
+    def _resolve_step(self, timeframe: str) -> Optional[pd.Timedelta]:
+        try:
+            offset = to_offset(timeframe)
+            step = getattr(offset, "delta", None)
+            if step is not None:
+                return step
+        except ValueError:
+            pass
+        try:
+            return pd.Timedelta(timeframe)
+        except (ValueError, TypeError):
+            return None
+
+    def _estimate_refresh_points(self, last_ts: pd.Timestamp, timeframe: str) -> Optional[int]:
+        step = self._resolve_step(timeframe)
+        if step is None or step <= pd.Timedelta(0):
+            return None
+        if last_ts.tzinfo is None:
+            last_ts = last_ts.tz_localize("UTC")
+        now_utc = pd.Timestamp.now(tz="UTC")
+        if now_utc < last_ts + step:
+            return 0
+        delta = now_utc - last_ts
+        if delta <= pd.Timedelta(0):
+            return 0
+        return int(delta / step)
+
+    def _refresh_cache_if_stale(
+        self,
+        symbol: str,
+        timeframe: str,
+        cached: pd.DataFrame,
+        cache_path: Path,
+    ) -> pd.DataFrame:
+        if cached.empty:
+            return cached
+        last_ts = cached.index.max()
+        if pd.isna(last_ts):
+            return cached
+        missing = self._estimate_refresh_points(pd.to_datetime(last_ts, utc=True), timeframe)
+        if missing is None or missing <= 0:
+            return cached
+        request_points = max(missing + 2, 1)
+        api_symbol = self._resolve_api_symbol(symbol)
+        try:
+            if request_points > self._config.output_size:
+                fetched = self._fetch_batched_history(api_symbol, timeframe, request_points)
+            else:
+                fetched = self._client.fetch_ohlcv(
+                    symbol=api_symbol,
+                    interval=timeframe,
+                    output_size=request_points,
+                )
+        except (TwelveDataError, ValueError) as exc:
+            logger.warning(
+                "Cache refresh failed for %s @ %s: %s; serving stale cache.",
+                symbol,
+                timeframe,
+                exc,
+            )
+            return cached
+
+        if fetched is None or fetched.empty:
+            return cached
+
+        combined = pd.concat([cached, fetched]).sort_index()
+        combined = combined[~combined.index.duplicated(keep="last")]
+        self._write_cache(cache_path, combined)
+        logger.info(
+            "Cache refreshed for %s @ %s | added=%d rows",
+            symbol,
+            timeframe,
+            len(combined) - len(cached),
+        )
+        return combined
 
     def load_data(
         self,
@@ -115,6 +193,8 @@ class DataProvider:
         if not refresh:
             cached = self._read_cache(cache_path)
             if cached is not None:
+                if self._auto_refresh and not is_range_query:
+                    cached = self._refresh_cache_if_stale(symbol, timeframe, cached, cache_path)
                 logger.debug("Serving %s @ %s from cache", symbol, timeframe)
                 if is_range_query:
                     start_bound = range_start or cached.index.min()
