@@ -355,8 +355,8 @@ close_series = frame["close"].dropna()
 
 roll_steps = 240
 train, _, test = time_split(close_series)
-model = load_model("nhits", "EUR/USD", "15min")
-preds = test_model("nhits", model, test, "15min",train_series=train,rolling_steps=roll_steps)
+model = load_model("neuralprophet", "BTC/USD", "15min")
+preds = test_model("neuralprophet", model, test, "15min",train_series=train,rolling_steps=roll_steps)
 plot_forecast_vs_real(preds, test[:roll_steps],show_metrics=True,show_confidence=True)
 
 # %%

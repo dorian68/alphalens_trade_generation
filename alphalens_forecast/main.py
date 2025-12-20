@@ -239,7 +239,7 @@ def orchestrate(
 ) -> OrchestrationResult:
     """Run the full forecasting workflow and return enriched artifacts."""
     cache_dir = Path(args.data_cache_dir).expanduser() if args.data_cache_dir else None
-    data_provider = DataProvider(config.twelve_data, cache_dir=cache_dir)
+    data_provider = DataProvider(config.twelve_data, cache_dir=cache_dir, auto_refresh=True)
     model_router = ModelRouter(model_dir)
     engine = ForecastEngine(config, data_provider, model_router)
     use_montecarlo = not args.no_montecarlo and config.monte_carlo.use_montecarlo
