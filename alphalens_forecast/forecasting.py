@@ -344,12 +344,15 @@ class ForecastEngine:
                 timeframe,
             )
         else:
-            mean_model = self._model_router.load_model(
-                model_type,
-                symbol,
-                timeframe,
-                device=device,
-            )
+            try:
+                mean_model = self._model_router.load_model(
+                    model_type,
+                    symbol,
+                    timeframe,
+                    device=device,
+                )
+            except FileNotFoundError:
+                mean_model = None
             if isinstance(mean_model, NHiTSForecaster) and mean_model.requires_retraining():
                 logger.warning(
                     "Cached NHITS model for %s @ %s was trained with covariates; retraining.",
@@ -382,7 +385,10 @@ class ForecastEngine:
             durations["garch_fit_seconds"] = 0.0
             logger.info("Using provided volatility model for %s [%s]", symbol, timeframe)
         else:
-            garch = self._model_router.load_egarch(symbol, timeframe)
+            try:
+                garch = self._model_router.load_egarch(symbol, timeframe)
+            except FileNotFoundError:
+                garch = None
             if garch is None:
                 logger.info("Training EGARCH model for %s [%s]", symbol, timeframe)
                 garch_fit_start = time.perf_counter()

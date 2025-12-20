@@ -1,4 +1,5 @@
 arch==5.3.1
+boto3>=1.28.0
 darts>=0.27.0
 matplotlib>=3.7.0
 neuralprophet>=0.6.0

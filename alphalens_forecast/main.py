@@ -492,7 +492,10 @@ def run_eval_mode(config: AppConfig, args: argparse.Namespace) -> None:
     model_type = (args.eval_model_type or select_model_type(args.timeframe)).lower()
     model_dir = resolve_model_directory(args.model_dir)
     router = ModelRouter(model_dir)
-    model = router.load_model(model_type, args.symbol, args.timeframe)
+    try:
+        model = router.load_model(model_type, args.symbol, args.timeframe)
+    except FileNotFoundError:
+        model = None
     if model is None:
         raise FileNotFoundError(
             f"No cached {model_type} model found for {args.symbol} @ {args.timeframe}. "

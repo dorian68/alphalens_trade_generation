@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Callable, Dict, Optional
 
 import pandas as pd
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 from alphalens_forecast.core import get_log_returns, prepare_features, prepare_residuals
 from alphalens_forecast.data import DataProvider
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class _TrainingProgress:
-    """Lightweight tqdm-based spinner to surface EGARCH training progress."""
+    """Lightweight tqdm-based spinner to surface model training progress."""
 
     def __init__(self, description: str, enabled: bool) -> None:
         self._description = description
@@ -41,6 +41,7 @@ class _TrainingProgress:
                 leave=False,
                 mininterval=0.5,
                 dynamic_ncols=True,
+                disable=False,
                 unit="step",
             )
             self._thread = threading.Thread(target=self._pulse, daemon=True)
@@ -102,21 +103,28 @@ def train_mean_model(
         provider_input = None
     provider = _default_provider(provider_input)
     router = _default_router(model_router)
-    frame = frame_override if frame_override is not None else provider.load_data(symbol, timeframe)
-    features = prepare_features(frame)
-    model = instantiate_model(model_type, device=device)
-    if training_config is not None:
-        model.set_dataloader_config(training_config)
-    print(f"Training model...")
-    model.fit(features.target, features.regressors)
-    print(f"Model trained")
-    metadata = {
-        "n_observations": len(frame),
-        "trained_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "training_frequency": TRAINING_FREQUENCIES[model_type]["frequency"],
-    }
-    print(f"saving model...")
-    router.save_model(model_type, symbol, timeframe, model, metadata=metadata)
+    desc = f"Training {model_type.upper()} [{symbol} @ {timeframe}]"
+    with _TrainingProgress(desc, enabled=True) as progress:
+        progress.update("Loading price history")
+        frame = frame_override if frame_override is not None else provider.load_data(symbol, timeframe)
+        progress.update("Preparing features")
+        features = prepare_features(frame)
+        model = instantiate_model(model_type, device=device)
+        if training_config is not None:
+            model.set_dataloader_config(training_config)
+        progress.update("Fitting model")
+        print(f"Training model...")
+        model.fit(features.target, features.regressors)
+        print(f"Model trained")
+        metadata = {
+            "n_observations": len(frame),
+            "trained_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "training_frequency": TRAINING_FREQUENCIES[model_type]["frequency"],
+        }
+        progress.update("Saving model")
+        print(f"saving model...")
+        router.save_model(model_type, symbol, timeframe, model, metadata=metadata)
+        progress.update("Done")
     print(f"Trained and saved {model_type} model for {symbol} @ {timeframe}")
     return model
 

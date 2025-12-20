@@ -291,6 +291,7 @@ router = ModelRouter(PROJECT_ROOT / "models")
 frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/EUR_USD/15min.csv", parse_dates=["datetime"]).set_index("datetime")
 # frame = frame.tail(20000)
 # frame = df_btc
+DEVICE = "cuda"
 
 frame.rename(columns={"Close": "close"}, inplace=True)
 close_series = frame["close"].dropna()
@@ -302,11 +303,11 @@ close_series = frame["close"].dropna()
 print("---- Training just started ----")
 
 symbol = "EUR/USD"
-for timeframe in ("15min","30min", "1h", "4h"):
-    # train_nhits(symbol, timeframe, model_router=router)
-    train_neuralprophet(symbol, timeframe, model_router=router, price_frame=frame)
-    # train_prophet(symbol, timeframe, model_router=router)
-    train_egarch(symbol, timeframe, model_router=router, price_frame=frame)
+for timeframe in ("30min", "1h", "4h"):
+    train_nhits(symbol, timeframe, model_router=router,device=DEVICE)
+    train_neuralprophet(symbol, timeframe, model_router=router, price_frame=frame,device=DEVICE)
+    train_prophet(symbol, timeframe, model_router=router,device=DEVICE)
+    # train_egarch(symbol, timeframe, model_router=router, price_frame=frame,device=DEVICE)
 
 print("---- Training just ended ----")
 

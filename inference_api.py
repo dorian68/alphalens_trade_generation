@@ -380,11 +380,7 @@ def handle_forecast(
             hint=hint,
         )
 
-    data_provider = DataProvider(
-        config.twelve_data,
-        cache_dir=resolve_cache_dir(),
-        auto_refresh=True,
-    )
+    data_provider = DataProvider(config.twelve_data, cache_dir=resolve_cache_dir())
     engine = ForecastEngine(config, data_provider, model_router)
 
     try:

@@ -250,6 +250,7 @@ def train_model(
     train_series: pd.Series,
     *,
     model_router: Optional[ModelRouter] = None,
+    device: Optional[str] = None,
 ) -> BaseForecaster | EGARCHVolModel:
     """Train and persist the requested model using the supplied training series."""
     if train_series.empty:
@@ -262,7 +263,7 @@ def train_model(
     trainer = _TRAINING_REGISTRY.get(normalized_name)
     if trainer is None:
         raise ValueError(f"Unknown model '{model_name}'.")
-    return trainer(symbol, timeframe, price_frame=frame, model_router=router)
+    return trainer(symbol, timeframe, price_frame=frame, model_router=router, device=device)
 
 
 def load_model(
@@ -271,14 +272,18 @@ def load_model(
     timeframe: str,
     *,
     model_router: Optional[ModelRouter] = None,
+    device: Optional[str] = None,
 ) -> BaseForecaster | EGARCHVolModel:
     """Load a previously saved model checkpoint."""
     router = model_router or ModelRouter()
     normalized_name = model_name.lower()
-    if normalized_name == "egarch":
-        model = router.load_egarch(symbol, timeframe)
-    else:
-        model = router.load_model(normalized_name, symbol, timeframe)
+    try:
+        if normalized_name == "egarch":
+            model = router.load_egarch(symbol, timeframe)
+        else:
+            model = router.load_model(normalized_name, symbol, timeframe, device=device)
+    except FileNotFoundError:
+        model = None
     if model is None:
         raise FileNotFoundError(
             f"No saved {normalized_name} model found for {symbol} @ {timeframe}."
@@ -422,6 +427,7 @@ def evaluate_on_test(
     val_ratio: float = 0.15,
     data_provider: Optional[DataProvider] = None,
     model_router: Optional[ModelRouter] = None,
+    device: Optional[str] = None,
     retrain: bool = False,
     plot: bool = True,
     include_vol: bool = False,
@@ -444,7 +450,7 @@ def evaluate_on_test(
     model: BaseForecaster | EGARCHVolModel | None = None
     if not retrain:
         try:
-            model = load_model(model_name, symbol, timeframe, model_router=router)
+            model = load_model(model_name, symbol, timeframe, model_router=router, device=device)
             logger.info(
                 "Loaded existing %s model for %s @ %s.",
                 model_name,
@@ -459,7 +465,7 @@ def evaluate_on_test(
                 timeframe,
             )
     if model is None:
-        model = train_model(model_name, symbol, timeframe, train, model_router=router)
+        model = train_model(model_name, symbol, timeframe, train, model_router=router, device=device)
 
     predictions = test_model(model_name, model, test, timeframe, train_series=train)
     actual_for_eval = test
@@ -486,7 +492,7 @@ def evaluate_on_test(
             raise ValueError("Only 'egarch' volatility models are supported.")
         if not retrain:
             try:
-                vol_model = load_model(vol_name, symbol, timeframe, model_router=router)
+                vol_model = load_model(vol_name, symbol, timeframe, model_router=router, device=device)
                 logger.info(
                     "Loaded existing %s volatility model for %s @ %s.",
                     vol_name,
@@ -501,7 +507,7 @@ def evaluate_on_test(
                     timeframe,
                 )
         if vol_model is None:
-            vol_model = train_model(vol_name, symbol, timeframe, train, model_router=router)  # type: ignore[arg-type]
+            vol_model = train_model(vol_name, symbol, timeframe, train, model_router=router, device=device)  # type: ignore[arg-type]
         vol_predictions = test_model(vol_name, vol_model, test, timeframe, train_series=train)
         vol_actual = (
             series_to_price_frame(test)["log_return"]

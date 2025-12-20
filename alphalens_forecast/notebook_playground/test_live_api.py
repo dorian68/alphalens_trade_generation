@@ -1,4 +1,4 @@
-#%%
+# %%
 import requests                                                                     
                                                                                     
 url = "http://3.142.243.85:8000/forecast"                                        
@@ -38,3 +38,4 @@ print(resp.json())
 #   Note : si tu lances ça depuis une page d’un autre domaine, le navigateur peut       
 #   bloquer la requête (CORS). Dans ce cas, utilise curl/Postman, ou teste depuis un    
 #   onglet ouvert directement sur l’IP de ton EC2.  
+# %%

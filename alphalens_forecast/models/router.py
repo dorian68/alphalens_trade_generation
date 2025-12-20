@@ -12,6 +12,7 @@ from typing import Any, Optional, Tuple
 
 import torch
 
+from alphalens_forecast.storage.s3_store import S3Store, S3UnavailableError
 from alphalens_forecast.utils.text import slugify
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,7 @@ class ModelRouter:
             )
         self._base_dir = resolved
         self._base_dir.mkdir(parents=True, exist_ok=True)
+        self._s3_store = S3Store.from_env(logger)
 
     @property
     def base_dir(self) -> Path:
@@ -132,6 +134,115 @@ class ModelRouter:
 
     def get_metadata_path(self, model_type: str, symbol: str, timeframe: str) -> Path:
         return self.get_model_dir(model_type, symbol, timeframe) / "metadata.json"
+
+    def _s3_symbol(self, symbol: str) -> str:
+        cleaned = "".join(ch for ch in symbol if ch.isalnum())
+        return cleaned or slugify(symbol)
+
+    def _s3_prefix(self, model_type: str, symbol: str, timeframe: str) -> str:
+        return f"{self._s3_symbol(symbol)}/{slugify(timeframe)}/{model_type.lower()}"
+
+    def _s3_model_key(self, model_type: str, symbol: str, timeframe: str) -> str:
+        return f"{self._s3_prefix(model_type, symbol, timeframe)}/model.pkl"
+
+    def _s3_metadata_key(self, model_type: str, symbol: str, timeframe: str) -> str:
+        return f"{self._s3_prefix(model_type, symbol, timeframe)}/metadata.json"
+
+    def _s3_metrics_key(self, model_type: str, symbol: str, timeframe: str) -> str:
+        return f"{self._s3_prefix(model_type, symbol, timeframe)}/metrics.json"
+
+    def _upload_to_s3(
+        self,
+        model_dir: Path,
+        saved_path: Path,
+        model_type: str,
+        symbol: str,
+        timeframe: str,
+    ) -> None:
+        if self._s3_store is None:
+            return
+        try:
+            self._s3_store.upload_file(
+                saved_path,
+                self._s3_model_key(model_type, symbol, timeframe),
+            )
+            metadata_path = self.get_metadata_path(model_type, symbol, timeframe)
+            if metadata_path.exists():
+                self._s3_store.upload_file(
+                    metadata_path,
+                    self._s3_metadata_key(model_type, symbol, timeframe),
+                )
+            metrics_path = model_dir / "metrics.json"
+            if metrics_path.exists():
+                self._s3_store.upload_file(
+                    metrics_path,
+                    self._s3_metrics_key(model_type, symbol, timeframe),
+                )
+            for path in model_dir.rglob("*"):
+                if not path.is_file():
+                    continue
+                if path == saved_path:
+                    continue
+                rel_path = path.relative_to(model_dir).as_posix()
+                if rel_path in {"metadata.json", "metrics.json"}:
+                    continue
+                key = f"{self._s3_prefix(model_type, symbol, timeframe)}/{rel_path}"
+                self._s3_store.upload_file(path, key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "S3 upload failed for %s @ %s (%s): %s",
+                symbol,
+                timeframe,
+                model_type,
+                exc,
+            )
+
+    def _sync_from_s3(self, model_type: str, symbol: str, timeframe: str, model_dir: Path) -> bool:
+        if self._s3_store is None:
+            return False
+        model_key = self._s3_model_key(model_type, symbol, timeframe)
+        metadata_key = self._s3_metadata_key(model_type, symbol, timeframe)
+        metrics_key = self._s3_metrics_key(model_type, symbol, timeframe)
+        try:
+            model_exists = self._s3_store.exists(model_key)
+            metadata_exists = self._s3_store.exists(metadata_key)
+        except S3UnavailableError as exc:
+            logger.warning("S3 unavailable; using local models only. (%s)", exc)
+            return False
+        if not model_exists and not metadata_exists:
+            raise FileNotFoundError(
+                f"No trained model available for {symbol} @ {timeframe} ({model_type})."
+            )
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        manifest: dict[str, Any] = {}
+        metadata_path = self.get_metadata_path(model_type, symbol, timeframe)
+        if metadata_exists:
+            self._s3_store.download_file(metadata_key, metadata_path)
+            try:
+                with open(metadata_path, "r", encoding="utf-8") as handle:
+                    manifest = json.load(handle)
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning("Failed to read S3 metadata for %s @ %s: %s", symbol, timeframe, exc)
+                manifest = {}
+
+        model_file = manifest.get("model_file") or "model.pkl"
+        if model_exists:
+            local_model_path = model_dir / model_file
+            self._s3_store.download_file(model_key, local_model_path)
+
+        if self._s3_store.exists(metrics_key):
+            metrics_path = model_dir / "metrics.json"
+            self._s3_store.download_file(metrics_key, metrics_path)
+
+        prefix = self._s3_prefix(model_type, symbol, timeframe)
+        for rel_key in self._s3_store.list(prefix):
+            if rel_key in {"model.pkl", "metadata.json", "metrics.json", model_file}:
+                continue
+            local_path = model_dir / rel_key
+            remote_path = f"{prefix}/{rel_key}"
+            self._s3_store.download_file(remote_path, local_path)
+        return True
 
     def save_model(
         self,
@@ -191,6 +302,7 @@ class ModelRouter:
         print(
             f"[ModelRouter] Metadata persisted for {model_type} ({symbol} @ {timeframe})"
         )
+        self._upload_to_s3(model_dir, saved_path, model_type, symbol, timeframe)
         logger.info(
             "Saved %s model for %s @ %s to %s (%s)",
             model_type,
@@ -210,6 +322,7 @@ class ModelRouter:
     ) -> Optional[Any]:
         """Return the model if it exists, otherwise None."""
         model_dir = self.get_model_dir(model_type, symbol, timeframe)
+        s3_synced = self._sync_from_s3(model_type, symbol, timeframe, model_dir)
         manifest_path = self.get_metadata_path(model_type, symbol, timeframe)
         manifest: dict[str, Any] = {}
         if manifest_path.exists():
@@ -225,6 +338,12 @@ class ModelRouter:
         model: Any
         if storage_format and model_file and class_path:
             artifact_path = model_dir / model_file
+            if not artifact_path.exists():
+                if s3_synced:
+                    raise FileNotFoundError(
+                        f"No trained model available for {symbol} @ {timeframe} ({model_type})."
+                    )
+                return None
             try:
                 model = self._load_from_artifact(
                     class_path,
@@ -245,7 +364,10 @@ class ModelRouter:
         else:
             legacy_path = self._legacy_model_path(model_type, symbol, timeframe)
             if not legacy_path.exists():
-                logger.debug("No %s model found for %s @ %s", model_type, symbol, timeframe)
+                if s3_synced:
+                    raise FileNotFoundError(
+                        f"No trained model available for {symbol} @ {timeframe} ({model_type})."
+                    )
                 return None
             try:
                 with open(legacy_path, "rb") as handle:
