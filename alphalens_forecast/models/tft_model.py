@@ -1,6 +1,7 @@
 """Temporal Fusion Transformer forecaster using Darts."""
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import pandas as pd
@@ -9,6 +10,8 @@ from darts.models import TFTModel
 
 from alphalens_forecast.models.base import BaseForecaster
 from alphalens_forecast.models.dataloader_audit import log_dataloader_audit
+
+logger = logging.getLogger(__name__)
 
 
 class TFTForecaster(BaseForecaster):
@@ -60,6 +63,17 @@ class TFTForecaster(BaseForecaster):
             kwargs.get("persistent_workers", False),
         )
         return kwargs
+
+    def set_device(self, device: str) -> None:
+        super().set_device(device)
+        if self._model is None:
+            return
+        if self.device.lower().startswith("cuda"):
+            return
+        try:
+            self._model.to_cpu()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("TFT failed to move model to CPU: %s", exc)
 
     def fit(
         self,

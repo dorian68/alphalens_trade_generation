@@ -81,6 +81,18 @@ class NeuralProphetForecaster(BaseForecaster):
                 # Centralized device handling for restored checkpoints.
                 self._trainer_config = {"accelerator": "gpu", "devices": 1}
 
+    def set_device(self, device: str) -> None:
+        super().set_device(device)
+        if self._model is None:
+            return
+        accelerator = "gpu" if self.device.lower().startswith("cuda") else "cpu"
+        if accelerator == "cpu":
+            self._trainer_config = None
+        try:
+            self._model.restore_trainer(accelerator=accelerator)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("NeuralProphet failed to set %s accelerator: %s", accelerator, exc)
+
     def _progress_display(self) -> str | None:
         """
         Return the progress bar setting, repairing older checkpoints on the fly.
@@ -228,7 +240,7 @@ class NeuralProphetForecaster(BaseForecaster):
         if not model_file.exists():
             raise FileNotFoundError(f"NeuralProphet checkpoint missing at {model_file}")
         _ensure_neuralprophet_safe_globals()
-        instance._model = _load_checkpoint(str(model_file))
+        instance._model = _load_checkpoint(str(model_file), accelerator="cpu")
         if frame_file.exists():
             frame = pd.read_json(frame_file, orient="split")
             frame["ds"] = pd.to_datetime(frame["ds"])
@@ -238,7 +250,8 @@ class NeuralProphetForecaster(BaseForecaster):
             instance._freq = meta.get("freq")
             instance._progress = meta.get("progress", instance._progress)
         return instance
-def _load_checkpoint(path: Path) -> NeuralProphet:
-    model = torch.load(path, map_location=None, weights_only=False)
-    model.restore_trainer(accelerator=None)
+def _load_checkpoint(path: Path, accelerator: Optional[str] = None) -> NeuralProphet:
+    map_location = "cpu" if accelerator == "cpu" else None
+    model = torch.load(path, map_location=map_location, weights_only=False)
+    model.restore_trainer(accelerator=accelerator)
     return model

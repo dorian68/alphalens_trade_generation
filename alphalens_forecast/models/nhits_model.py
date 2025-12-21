@@ -88,6 +88,17 @@ class NHiTSForecaster(BaseForecaster):
             **kwargs,
         )
 
+    def set_device(self, device: str) -> None:
+        super().set_device(device)
+        if self._model is None:
+            return
+        if self.device.lower().startswith("cuda"):
+            return
+        try:
+            self._model.to_cpu()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("NHITS failed to move model to CPU: %s", exc)
+
     def _build_target_series(self, target: pd.Series) -> TimeSeries:
         frame = series_to_dataframe(target)
         return build_timeseries(frame)
@@ -209,8 +220,17 @@ class NHiTSForecaster(BaseForecaster):
         if checkpoint_path.exists():
             try:
                 _ensure_torch_safe_globals()
-                self._model = NHiTSModel.load(str(checkpoint_path))
+                load_kwargs = {}
+                if not self.device.lower().startswith("cuda"):
+                    load_kwargs["pl_trainer_kwargs"] = {"accelerator": "cpu"}
+                    load_kwargs["map_location"] = "cpu"
+                self._model = NHiTSModel.load(str(checkpoint_path), **load_kwargs)
                 self._checkpoint_path = checkpoint_path
+                if not self.device.lower().startswith("cuda"):
+                    try:
+                        self._model.to_cpu()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("NHITS failed to move checkpoint to CPU: %s", exc)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "NHITS checkpoint load failed at %s; fallback to embedded state: %s",
