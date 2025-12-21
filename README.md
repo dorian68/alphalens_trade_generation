@@ -115,6 +115,20 @@ MAX_POSITION_SIZE=1.0
 | `MAX_POSITION_SIZE` | Cap on position sizing. | `1.0` |
 | `DEFAULT_TIMEFRAME` | Risk engine fallback timeframe. | `15min` |
 | `TORCH_DEVICE` | Torch device (`cpu`, `cuda`). | `cpu` |
+| `ALPHALENS_MODEL_BUCKET` | S3 bucket for model artifacts. | (empty) |
+| `ALPHALENS_MODEL_PREFIX` | Optional S3 prefix for model artifacts. | (empty) |
+| `ALPHALENS_S3_ONLY` / `ALPHALENS_REQUIRE_S3` | Require models from S3 only; disables local fallback and requires S3 for uploads. | `false` |
+
+
+S3-only mode (production):
+
+```env
+ALPHALENS_MODEL_BUCKET=your_bucket
+ALPHALENS_MODEL_PREFIX=production
+ALPHALENS_S3_ONLY=true
+```
+
+When enabled, the runtime will only load models present in S3 (no local fallback) and requires S3 for uploads. Missing models can be retrained and then persisted back to S3, but requests still fail if S3 is unavailable.
 
 Optional: populate `config/instruments.yml` to control the universe:
 
@@ -212,6 +226,7 @@ Saved artifacts are loaded automatically by `ModelRouter` when the CLI runs. Com
 - **Prophet build issues:** ensure `cmdstanpy` toolchain is installed or use the precompiled wheels available for manylinux.
 - **CUDA out of memory:** lower `MC_PATHS`, reduce horizons, or run on CPU by setting `TORCH_DEVICE=cpu`.
 - **Model reuse mismatch:** delete stale entries under `models/` or disable `--reuse-model` until the cache is refreshed.
+- **S3-only mode errors:** ensure `ALPHALENS_MODEL_BUCKET` is set, AWS credentials are available, and `boto3` is installed; confirm the model artifacts exist under `s3://<bucket>/<prefix>/<symbol>/<timeframe>/<model_type>/`.
 - **Not enough history for backtests:** extend `DATA_OUTPUT_SIZE`, refresh the cache (`--data-cache-dir ... --backtest --backtest-min-history <bigger>`), or reduce horizons.
 
 ## License

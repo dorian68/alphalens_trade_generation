@@ -1,6 +1,7 @@
 """Abstract base forecaster interface."""
 from __future__ import annotations
 
+import io
 import pickle
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -60,5 +61,17 @@ class BaseForecaster(ABC):
 
     def load_state_dict(self, state: Dict[str, Any]) -> None:
         """Restore the model from ``state`` produced by ``state_dict``."""
-        restored = pickle.loads(state["pickled_model"])
+        restored = self._safe_unpickle(state["pickled_model"])
         self.__dict__.update(restored.__dict__)
+
+    @staticmethod
+    def _safe_unpickle(payload: bytes) -> Any:
+        """Unpickle models across platforms by normalizing Path classes."""
+
+        class _CompatUnpickler(pickle.Unpickler):
+            def find_class(self, module: str, name: str) -> Any:
+                if module == "pathlib" and name in {"WindowsPath", "PosixPath"}:
+                    return Path
+                return super().find_class(module, name)
+
+        return _CompatUnpickler(io.BytesIO(payload)).load()

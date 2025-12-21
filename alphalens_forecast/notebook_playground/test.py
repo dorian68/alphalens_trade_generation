@@ -302,12 +302,12 @@ close_series = frame["close"].dropna()
 
 print("---- Training just started ----")
 
-symbol = "EUR/USD"
-for timeframe in ("30min", "1h", "4h"):
+symbol = "XAU/USD"
+for timeframe in ("15min",):#"30min", "1h", "4h"):
     train_nhits(symbol, timeframe, model_router=router,device=DEVICE)
     train_neuralprophet(symbol, timeframe, model_router=router, price_frame=frame,device=DEVICE)
     train_prophet(symbol, timeframe, model_router=router,device=DEVICE)
-    # train_egarch(symbol, timeframe, model_router=router, price_frame=frame,device=DEVICE)
+    # train_egarch(symbol, timeframe, model_router=router, price_frame=frame)
 
 print("---- Training just ended ----")
 

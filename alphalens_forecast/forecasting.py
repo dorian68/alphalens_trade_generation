@@ -304,7 +304,6 @@ class ForecastEngine:
 
         data_hash = compute_dataframe_hash(price_frame)
         logger.debug("Price frame hash: %s", data_hash)
-
         if model_store and reuse_cached and frame_override is None:
             reused = self._reuse_from_store(
                 model_store=model_store,

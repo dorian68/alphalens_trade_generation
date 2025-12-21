@@ -26,6 +26,7 @@ from alphalens_forecast.data import DataProvider
 from alphalens_forecast.forecasting import FREQ_MAP, ForecastEngine
 from alphalens_forecast.models import ModelRouter, NHiTSForecaster
 from alphalens_forecast.models.selection import MODEL_TYPES, resolve_device, select_model_type
+from alphalens_forecast.storage.s3_store import S3UnavailableError
 from alphalens_forecast.utils import TwelveDataError
 
 
@@ -45,6 +46,30 @@ LOG_LEVEL = os.environ.get("ALPHALENS_LOG_LEVEL", "INFO").upper()
 SERVER_START = time.perf_counter()
 
 logger = logging.getLogger("alphalens_api")
+
+_S3_ENFORCED = False
+
+
+def _enforce_s3_model_store() -> None:
+    global _S3_ENFORCED
+    if _S3_ENFORCED:
+        return
+    forced = {}
+    for key in ("ALPHALENS_S3_ONLY", "ALPHALENS_REQUIRE_S3"):
+        raw = os.environ.get(key, "")
+        if raw.strip().lower() not in {"1", "true", "yes", "y"}:
+            forced[key] = raw or "<unset>"
+            os.environ[key] = "true"
+    if forced:
+        logger.warning(
+            "Forcing S3-only model store for inference; overrides: %s",
+            forced,
+        )
+    else:
+        logger.info("S3-only model store already enforced for inference.")
+    _S3_ENFORCED = True
+
+
 
 
 def utc_now_iso() -> str:
@@ -169,7 +194,16 @@ def load_models(
 
     mean_info = inspect_model_assets(router, model_type, symbol, timeframe)
     mean_info["device"] = device
-    mean_model = router.load_model(model_type, symbol, timeframe, device=device)
+    mean_model = None
+    try:
+        mean_model = router.load_model(model_type, symbol, timeframe, device=device)
+    except FileNotFoundError as exc:
+        mean_info["reason"] = "not_found"
+        mean_info["error"] = str(exc)
+    except (S3UnavailableError, RuntimeError) as exc:
+        mean_info["reason"] = "s3_unavailable"
+        mean_info["error"] = str(exc)
+        raise
     mean_info["loaded"] = mean_model is not None
     if isinstance(mean_model, NHiTSForecaster) and mean_model.requires_retraining():
         mean_info["loaded"] = False
@@ -179,9 +213,18 @@ def load_models(
         mean_info["reason"] = infer_missing_reason(mean_info)
 
     vol_info = inspect_model_assets(router, "egarch", symbol, timeframe)
-    vol_model = router.load_egarch(symbol, timeframe)
+    vol_model = None
+    try:
+        vol_model = router.load_egarch(symbol, timeframe)
+    except FileNotFoundError as exc:
+        vol_info["reason"] = "not_found"
+        vol_info["error"] = str(exc)
+    except (S3UnavailableError, RuntimeError) as exc:
+        vol_info["reason"] = "s3_unavailable"
+        vol_info["error"] = str(exc)
+        raise
     vol_info["loaded"] = vol_model is not None
-    if vol_model is None:
+    if vol_model is None and "reason" not in vol_info:
         vol_info["reason"] = infer_missing_reason(vol_info)
 
     status = {
@@ -248,6 +291,7 @@ def handle_forecast(
     debug: bool,
 ) -> Tuple[int, Dict[str, Any]]:
     start = time.perf_counter()
+    _enforce_s3_model_store()
     config = get_config()
     warnings: List[str] = []
     errors: List[str] = []
@@ -347,14 +391,31 @@ def handle_forecast(
         "include_model_info": include_model_info,
     }
 
-    model_router = ModelRouter()
-    mean_model, vol_model, model_status = load_models(
-        config,
-        model_router,
-        symbol,
-        timeframe,
-        model_type,
-    )
+    try:
+        model_router = ModelRouter()
+        mean_model, vol_model, model_status = load_models(
+            config,
+            model_router,
+            symbol,
+            timeframe,
+            model_type,
+        )
+    except S3UnavailableError as exc:
+        return 503, build_error_payload(
+            status="s3_unavailable",
+            message="S3 model store unavailable",
+            request_id=request_id,
+            details={"error": str(exc)},
+            hint="Check AWS credentials and ALPHALENS_MODEL_BUCKET.",
+        )
+    except RuntimeError as exc:
+        return 503, build_error_payload(
+            status="s3_required",
+            message=str(exc),
+            request_id=request_id,
+            details={"error": str(exc)},
+            hint="Ensure S3-only settings and credentials are configured.",
+        )
     if mean_model is None or vol_model is None:
         missing = []
         if mean_model is None:
@@ -362,7 +423,7 @@ def handle_forecast(
         if vol_model is None:
             missing.append("vol")
         hint = (
-            "Train and save models using the CLI, then deploy the models directory to this server. "
+            "Train and save models using the CLI so artifacts are uploaded to S3. "
             "Example: python -m alphalens_forecast.main --symbol "
             f"{symbol} --timeframe {timeframe} --horizons "
             f"{' '.join(str(h) for h in horizons)} --save-models true"
@@ -549,6 +610,7 @@ def main() -> None:
         level=getattr(logging, LOG_LEVEL, logging.INFO),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
+    _enforce_s3_model_store()
     logger.info("Starting AlphaLens inference API on %s:%s", DEFAULT_HOST, DEFAULT_PORT)
     server = ThreadingHTTPServer((DEFAULT_HOST, DEFAULT_PORT), ForecastAPIHandler)
     try:

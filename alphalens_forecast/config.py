@@ -102,6 +102,10 @@ class AppConfig:
     monte_carlo: MonteCarloConfig = field(default_factory=MonteCarloConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
+    s3_only: bool = (
+        _env_bool("ALPHALENS_S3_ONLY", False)
+        or _env_bool("ALPHALENS_REQUIRE_S3", False)
+    )
     default_timeframe: str = os.getenv("DEFAULT_TIMEFRAME", "15min")
     torch_device: str = os.getenv("TORCH_DEVICE", "cpu")
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -20,6 +21,13 @@ from alphalens_forecast.models.selection import instantiate_model
 from alphalens_forecast.training_schedule import TRAINING_FREQUENCIES
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_training_device(device: Optional[str]) -> str:
+    """Default to TORCH_DEVICE when no explicit device was provided."""
+    if device is None or not str(device).strip():
+        return os.getenv("TORCH_DEVICE", "cpu")
+    return device
 
 
 class _TrainingProgress:
@@ -98,6 +106,7 @@ def train_mean_model(
     """Shared training loop for Prophet/NeuralProphet/NHiTS backends."""
     frame_override = price_frame
     provider_input = data_provider
+    resolved_device = _resolve_training_device(device)
     if isinstance(provider_input, pd.DataFrame):
         frame_override = provider_input
         provider_input = None
@@ -109,7 +118,7 @@ def train_mean_model(
         frame = frame_override if frame_override is not None else provider.load_data(symbol, timeframe)
         progress.update("Preparing features")
         features = prepare_features(frame)
-        model = instantiate_model(model_type, device=device)
+        model = instantiate_model(model_type, device=resolved_device)
         if training_config is not None:
             model.set_dataloader_config(training_config)
         progress.update("Fitting model")
@@ -213,7 +222,8 @@ def train_tft(
     router = _default_router(model_router)
     frame = price_frame if price_frame is not None else provider.load_data(symbol, timeframe)
     features = prepare_features(frame)
-    model = instantiate_model("tft", device=device)
+    resolved_device = _resolve_training_device(device)
+    model = instantiate_model("tft", device=resolved_device)
     if training_config is not None:
         model.set_dataloader_config(training_config)
     model.fit(features.target, features.regressors)
