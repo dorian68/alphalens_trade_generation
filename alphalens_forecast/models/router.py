@@ -18,6 +18,16 @@ from alphalens_forecast.utils.text import slugify
 logger = logging.getLogger(__name__)
 
 
+def _emit_message(message: str) -> None:
+    """Emit console output without breaking tqdm progress bars when available."""
+    try:
+        from tqdm import tqdm  # type: ignore
+
+        tqdm.write(message)
+    except Exception:
+        print(message)
+
+
 def _env_bool(key: str, default: bool = False) -> bool:
     value = os.getenv(key)
     if value is None:
@@ -500,13 +510,13 @@ class ModelRouter:
         """Persist a fitted model and optional metadata."""
         model_dir = self.get_model_dir(model_type, symbol, timeframe)
         model_dir.mkdir(parents=True, exist_ok=True)
-        print(
+        _emit_message(
             f"[ModelRouter] Starting save for {model_type} model ({symbol} @ {timeframe}) into {model_dir}"
         )
         if hasattr(model, "save_artifacts"):
             try:
                 model.save_artifacts(model_dir)
-                print(
+                _emit_message(
                     f"[ModelRouter] Auxiliary artifacts saved for {model_type} ({symbol} @ {timeframe})"
                 )
             except Exception as exc:  # noqa: BLE001
@@ -517,7 +527,7 @@ class ModelRouter:
                     timeframe,
                     exc,
                 )
-                print(
+                _emit_message(
                     f"[ModelRouter] WARNING: save_artifacts failed for {model_type} ({symbol} @ {timeframe}): {exc}"
                 )
         model_path = model_dir / "model"
@@ -529,7 +539,7 @@ class ModelRouter:
             timeframe,
             logger,
         )
-        print(
+        _emit_message(
             f"[ModelRouter] Core model persisted for {model_type} ({symbol} @ {timeframe}) to {saved_path}"
         )
         manifest = {
@@ -544,7 +554,7 @@ class ModelRouter:
         }
         with open(self.get_metadata_path(model_type, symbol, timeframe), "w", encoding="utf-8") as handle:
             json.dump(manifest, handle, indent=2)
-        print(
+        _emit_message(
             f"[ModelRouter] Metadata persisted for {model_type} ({symbol} @ {timeframe})"
         )
         self._upload_to_s3(model_dir, saved_path, model_type, symbol, timeframe)

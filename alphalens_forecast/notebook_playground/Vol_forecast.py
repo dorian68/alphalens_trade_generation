@@ -8,11 +8,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.pyplot as plt 
 from statsmodels.graphics.tsaplots import plot_pacf
+from alphalens_forecast.data import DataProvider
 
 # %%
-path_file = "/home/ubuntu/.vscode-server/projects/alphalens_forecast/ALPHALENS_FORECAST/alphalens_forecast/data/cache/EUR_USD/15min.csv"
-df = pd.read_csv(path_file, parse_dates=['datetime'], index_col='datetime')
-df = df.sort_index()
+# path_file = "/home/ubuntu/.vscode-server/projects/alphalens_forecast/ALPHALENS_FORECAST/alphalens_forecast/data/cache/EUR_USD/15min.csv"
+# df = pd.read_csv(path_file, parse_dates=['datetime'], index_col='datetime')
+provider = DataProvider()  # nécessite TWELVE_DATA_API_KEY dans l'env
+df = provider.load_data("EUR/USD", "15min", refresh=False)
 
 plt.plot(df['close'])
 plt.title('EUR/USD Close Prices')
@@ -70,12 +72,12 @@ forecast = normal_result.forecast(horizon=horizon, reindex=False)
 sigma = np.sqrt(forecast.variance.iloc[-1]) / 1000  # tu avais multiplié les returns par 1000, donc on redivise
 
 # %%
-# method = "simulation" to get simulated paths
-sim_analytic = normal_result.forecast(horizon=horizon, reindex=False, method="analytic", simulations=1000)
-paths_sigma_analytics = np.sqrt(sim_analytic.variance.mean(axis=0)) / 1000
-params = normal_result.params
-print("omega, alpha, beta:", params["omega"], params["alpha[1]"], params["beta[1]"])
-plt.plot(paths_sigma_analytics, color='green', label='Analytic Forecast')
+# # method = "simulation" to get simulated paths
+# sim_analytic = normal_result.forecast(horizon=horizon, reindex=False, method="analytic", simulations=1000)
+# paths_sigma_analytics = np.sqrt(sim_analytic.variance.mean(axis=0)) / 1000
+# params = normal_result.params
+# print("omega, alpha, beta:", params["omega"], params["alpha[1]"], params["beta[1]"])
+# plt.plot(paths_sigma_analytics, color='green', label='Analytic Forecast')
 
 # method = "analytic" to get analytic forecast
 sim_simulation = normal_result.forecast(horizon=horizon, reindex=False, method="simulation", simulations=1000)
@@ -85,11 +87,11 @@ print("omega, alpha, beta:", params["omega"], params["alpha[1]"], params["beta[1
 plt.plot(paths_sigma_simulation, color='red', label='Simulation Forecast')
 
 # method = "bootstrap" to get bootstrap forecast
-sim_bootstrap = normal_result.forecast(horizon=horizon, reindex=False, method="bootstrap", simulations=1000)
-paths_sigma_bootstrap = np.sqrt(sim_bootstrap.variance.mean(axis=0)) / 1000
-params = normal_result.params
-print("omega, alpha, beta:", params["omega"], params["alpha[1]"], params["beta[1]"])
-plt.plot(paths_sigma_bootstrap, color='blue', label='Bootstrap Forecast')
+# sim_bootstrap = normal_result.forecast(horizon=horizon, reindex=False, method="bootstrap", simulations=1000)
+# paths_sigma_bootstrap = np.sqrt(sim_bootstrap.variance.mean(axis=0)) / 1000
+# params = normal_result.params
+# print("omega, alpha, beta:", params["omega"], params["alpha[1]"], params["beta[1]"])
+# plt.plot(paths_sigma_bootstrap, color='blue', label='Bootstrap Forecast')
 
 
 # %%
@@ -140,6 +142,7 @@ r = df["return"].dropna()
 train, _ , test = time_split(r, train_ratio=0.8)
 
 garch_model = arch_model(train * 1000, p=1,q=1, mean="ar", vol="GARCH", dist="skewt")
+
 garch_trained = garch_model.fit()
 
 garch_trained.summary()
@@ -157,5 +160,18 @@ plt.xlabel('Time')
 plt.ylabel('Volatility / Returns')
 plt.legend()
 plt.show()  
+
+# %%
+#************************************************************
+#*  
+#*          Stutent probability quantiles computation
+#*
+#************************************************************
+
+from alphalens_forecast.forecasting import compute_student_t_quantiles
+
+d_student = compute_student_t_quantiles(15,sigma=0.02,dof=5)
+
+
 
 # %%

@@ -69,19 +69,14 @@ def _enforce_s3_model_store() -> None:
         logger.info("S3-only model store already enforced for inference.")
     _S3_ENFORCED = True
 
-
-
-
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
 
 def resolve_cache_dir() -> Optional[Path]:
     raw = os.environ.get("ALPHALENS_DATA_CACHE_DIR") or os.environ.get("ALPHALENS_CACHE_DIR")
     if not raw:
         return None
     return Path(raw).expanduser()
-
 
 def coerce_bool(value: Any, default: bool, label: str, warnings: List[str]) -> bool:
     if value is None:
@@ -99,7 +94,6 @@ def coerce_bool(value: Any, default: bool, label: str, warnings: List[str]) -> b
     warnings.append(f"{label} is invalid; using default {default}.")
     return default
 
-
 def coerce_int(value: Any, default: int, label: str, warnings: List[str]) -> int:
     if value is None:
         return default
@@ -108,7 +102,6 @@ def coerce_int(value: Any, default: int, label: str, warnings: List[str]) -> int
     except (TypeError, ValueError):
         warnings.append(f"{label} is invalid; using default {default}.")
         return default
-
 
 def parse_horizons(value: Any, default: List[int]) -> Tuple[List[int], List[Any], bool]:
     if value is None:
@@ -144,7 +137,6 @@ def parse_horizons(value: Any, default: List[int]) -> Tuple[List[int], List[Any]
 
     return deduped, invalid, False
 
-
 def inspect_model_assets(
     router: ModelRouter,
     model_type: str,
@@ -176,12 +168,10 @@ def inspect_model_assets(
     info["legacy_exists"] = legacy_path.exists()
     return info
 
-
 def infer_missing_reason(info: Dict[str, Any]) -> str:
     if info.get("metadata_exists") or info.get("artifact_exists") or info.get("legacy_exists"):
         return "load_failed"
     return "not_found"
-
 
 def load_models(
     config,
@@ -235,7 +225,6 @@ def load_models(
     }
     return mean_model, vol_model, status
 
-
 def serialize_predictions(predictions: Dict[str, pd.DataFrame]) -> Dict[str, List[Dict[str, Any]]]:
     payload: Dict[str, List[Dict[str, Any]]] = {}
     for horizon, frame in predictions.items():
@@ -254,7 +243,6 @@ def serialize_predictions(predictions: Dict[str, pd.DataFrame]) -> Dict[str, Lis
             for ts, val in zip(df["ds"], df["yhat"])
         ]
     return payload
-
 
 def build_error_payload(
     *,
@@ -282,7 +270,6 @@ def build_error_payload(
     if debug:
         payload["debug"] = debug
     return payload
-
 
 def handle_forecast(
     payload: Dict[str, Any],
@@ -509,7 +496,6 @@ def handle_forecast(
     payload_out["data"]["total_seconds"] = round(time.perf_counter() - start, 3)
 
     return 200, payload_out
-
 
 class ForecastAPIHandler(BaseHTTPRequestHandler):
     server_version = "AlphaLensForecastAPI/1.0"

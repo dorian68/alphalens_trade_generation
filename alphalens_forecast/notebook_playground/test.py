@@ -45,11 +45,6 @@ df_eurusd = pd.read_csv(
     parse_dates=["datetime"],
 ).set_index("datetime").sort_index()
 
-# %%
-# ************************************************************************
-# * ALPHALENS FORECAST TESTING SCRIPT                                    *  
-# ************************************************************************    
-    
 
 
 # %%
@@ -287,27 +282,34 @@ provider = DataProvider()
 # frame = provider.load_data("EUR/USD", "15min", refresh=True, max_points=500000)
 
 PROJECT_ROOT = Path("C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
+# PROJECT_ROOT = Path("C:\\Users\\Labry\\.cache\\kagglehub\\datasets\\mczielinski\\bitcoin-historical-data\\versions\\454")
+
 router = ModelRouter(PROJECT_ROOT / "models")
-frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/EUR_USD/15min.csv", parse_dates=["datetime"]).set_index("datetime")
+# frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/BTC_USD/15min.csv", parse_dates=["datetime"]).set_index("datetime")
+# frame = pd.read_csv( PROJECT_ROOT / "btcusd_1-min_data.csv", parse_dates=["Timestamp"])
+# frame.rename(columns={"Timestamp": "datetime"}, inplace=True)
+# frame.set_index("datetime", inplace=True)
 # frame = frame.tail(20000)
 # frame = df_btc
 DEVICE = "cuda"
 
-frame.rename(columns={"Close": "close"}, inplace=True)
-close_series = frame["close"].dropna()
+# frame.rename(columns={"Close": "close"}, inplace=True)
+# close_series = frame["close"].dropna()
 
 # train, valid, test = time_split(close_series)
-
 # print(frame.head())
 
 print("---- Training just started ----")
 
-symbol = "XAU/USD"
-for timeframe in ("15min",):#"30min", "1h", "4h"):
-    train_nhits(symbol, timeframe, model_router=router,device=DEVICE)
-    train_neuralprophet(symbol, timeframe, model_router=router, price_frame=frame,device=DEVICE)
-    train_prophet(symbol, timeframe, model_router=router,device=DEVICE)
-    # train_egarch(symbol, timeframe, model_router=router, price_frame=frame)
+
+# symbol = "EUR/USD"
+asset_list = ["GBP/USD","AUD/USD","BTC/USD","ETH/USD","XAU/USD","XLM/USD"]
+for symbol in asset_list:
+    for timeframe in ("15min","30min","1h","4h"):
+        train_nhits(symbol, timeframe, model_router=router,device=DEVICE)
+        train_neuralprophet(symbol, timeframe, model_router=router,device=DEVICE)
+        train_prophet(symbol, timeframe, model_router=router,device=DEVICE)
+        train_egarch(symbol, timeframe, model_router=router)
 
 print("---- Training just ended ----")
 
@@ -346,16 +348,16 @@ from alphalens_forecast.data import DataProvider
 
 PROJECT_ROOT = Path(r"C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
 
-frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/BTC_USD/15min.csv", parse_dates=["datetime"]).set_index("datetime")
+frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/XLM_USD/15min.csv", parse_dates=["datetime"]).set_index("datetime")
 close_series = frame["close"].dropna()
 
 # provider = DataProvider()
 # price_frame = provider.load_data("EUR/USD", "15min")
 # close_series = price_frame["close"].dropna()
 
-roll_steps = 240
+roll_steps = 500
 train, _, test = time_split(close_series)
-model = load_model("neuralprophet", "BTC/USD", "15min")
+model = load_model("neuralprophet", "EUR/USD", "15min")
 preds = test_model("neuralprophet", model, test, "15min",train_series=train,rolling_steps=roll_steps)
 plot_forecast_vs_real(preds, test[:roll_steps],show_metrics=True,show_confidence=True)
 
@@ -413,7 +415,7 @@ import alphalens_forecast
 from alphalens_forecast.data import DataProvider
 
 provider = DataProvider()  # nécessite TWELVE_DATA_API_KEY dans l'env
-frame = provider.load_data("EUR/USD", "15min", refresh=True, max_points=500000)
+frame = provider.load_data("XAU/USD", "15min", refresh=True, max_points=500000)
 
 # %%
 from pathlib import Path
@@ -509,6 +511,7 @@ from alphalens_forecast.evaluation import (
 from alphalens_forecast.utils.timeseries import series_to_price_frame
 
 PROJECT_ROOT = Path("/home/ubuntu/.vscode-server/projects/alphalens_forecast/ALPHALENS_FORECAST")
+PROJECT_ROOT = Path(r"C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
 frame = pd.read_csv(
     PROJECT_ROOT / "alphalens_forecast/data/cache/EUR_USD/15min.csv",
     parse_dates=["datetime"],
@@ -517,8 +520,8 @@ frame = pd.read_csv(
 close_series = frame["close"].dropna().astype(float)
 train, _, test = time_split(close_series)
 
-model = load_model("egarch", "EUR/USD", "15min")
-preds = test_model("egarch", model, test, "15min", train_series=train)  # renvoie sigma
+model = load_model("garch", "EUR/USD", "15min")
+preds = test_model("garch", model, test, "15min", train_series=train)  # renvoie sigma
 
 price_test = series_to_price_frame(test)
 actual_vol = price_test["log_return"].abs().reindex(test.index, fill_value=0.0)

@@ -56,7 +56,7 @@ class NeuralProphetForecaster(BaseForecaster):
         self._freq: Optional[str] = None
         self._progress: str | None = None
         self._trainer_config = None
-        self._batch_size = 10000
+        self._batch_size = 20000
         if self.device.lower().startswith("cuda"):
             # Centralized device handling: let Lightning manage GPU placement.
             self._trainer_config = {"accelerator": "gpu", "devices": 1}

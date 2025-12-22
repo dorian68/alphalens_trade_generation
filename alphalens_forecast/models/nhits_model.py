@@ -55,7 +55,7 @@ class NHiTSForecaster(BaseForecaster):
         self._input_chunk_length = input_chunk_length
         self._output_chunk_length = output_chunk_length
         self._n_epochs = 100
-        self._batch_size = 10000
+        self._batch_size = 20000
         self._dropout = 0.1
         self._random_state = 42
         self._learning_rate = 1e-3

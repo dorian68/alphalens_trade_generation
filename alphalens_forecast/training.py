@@ -21,6 +21,7 @@ from alphalens_forecast.models.selection import instantiate_model
 from alphalens_forecast.training_schedule import TRAINING_FREQUENCIES
 
 logger = logging.getLogger(__name__)
+_INNER_PROGRESS_MODELS = {"nhits", "tft"}
 
 
 def _resolve_training_device(device: Optional[str]) -> str:
@@ -107,13 +108,14 @@ def train_mean_model(
     frame_override = price_frame
     provider_input = data_provider
     resolved_device = _resolve_training_device(device)
+    progress_enabled = model_type.lower() not in _INNER_PROGRESS_MODELS
     if isinstance(provider_input, pd.DataFrame):
         frame_override = provider_input
         provider_input = None
     provider = _default_provider(provider_input)
     router = _default_router(model_router)
     desc = f"Training {model_type.upper()} [{symbol} @ {timeframe}]"
-    with _TrainingProgress(desc, enabled=True) as progress:
+    with _TrainingProgress(desc, enabled=progress_enabled) as progress:
         progress.update("Loading price history")
         frame = frame_override if frame_override is not None else provider.load_data(symbol, timeframe)
         progress.update("Preparing features")
@@ -122,16 +124,13 @@ def train_mean_model(
         if training_config is not None:
             model.set_dataloader_config(training_config)
         progress.update("Fitting model")
-        print(f"Training model...")
         model.fit(features.target, features.regressors)
-        print(f"Model trained")
         metadata = {
             "n_observations": len(frame),
             "trained_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "training_frequency": TRAINING_FREQUENCIES[model_type]["frequency"],
         }
         progress.update("Saving model")
-        print(f"saving model...")
         router.save_model(model_type, symbol, timeframe, model, metadata=metadata)
         progress.update("Done")
     print(f"Trained and saved {model_type} model for {symbol} @ {timeframe}")

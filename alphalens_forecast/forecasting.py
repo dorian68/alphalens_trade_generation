@@ -183,13 +183,13 @@ def compute_student_t_quantiles(
     from scipy.stats import t
 
     dist = t(df=dof)
-    q20_log = median_log + dist.ppf(0.20) * sigma
+    q15_log = median_log + dist.ppf(0.15) * sigma
     q50_log = median_log
-    q80_log = median_log + dist.ppf(0.80) * sigma
+    q85_log = median_log + dist.ppf(0.85) * sigma
     return {
-        "p20": float(np.exp(q20_log)),
+        "p20": float(np.exp(q15_log)),
         "p50": float(np.exp(q50_log)),
-        "p80": float(np.exp(q80_log)),
+        "p80": float(np.exp(q85_log)),
     }
 
 
