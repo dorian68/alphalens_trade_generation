@@ -252,6 +252,7 @@ class ForecastEngine:
         horizons: Iterable[int],
         paths: int,
         use_montecarlo: bool,
+        trade_mode: str = "spot",
         reuse_cached: bool = False,
         model_store: Optional[ModelStore] = None,
         show_progress: bool = True,
@@ -265,6 +266,9 @@ class ForecastEngine:
         """Run the full pipeline: data -> mean model -> vol -> Monte Carlo."""
         run_start = time.perf_counter()
         run_timestamp_iso, run_timestamp_slug = make_run_timestamp()
+        trade_mode_normalized = str(trade_mode or "spot").strip().lower()
+        if trade_mode_normalized not in {"spot", "forward"}:
+            raise ValueError("trade_mode must be one of: spot, forward")
 
         logger.info(
             "Starting forecast for %s [%s] | horizons=%s",
@@ -434,6 +438,13 @@ class ForecastEngine:
             logger.info("Monte Carlo enabled | paths=%d seed=%s", paths, self._config.monte_carlo.seed)
         else:
             logger.info("Monte Carlo disabled")
+        forward_mc_simulator = None
+        if use_montecarlo and trade_mode_normalized == "forward":
+            forward_mc_simulator = MonteCarloSimulator(
+                paths=paths,
+                seed=self._config.monte_carlo.seed,
+                show_progress=False,
+            )
 
         risk_engine = RiskEngine(self._config)
         horizon_payload: List[HorizonForecast] = []
@@ -560,6 +571,23 @@ class ForecastEngine:
                     mc_duration,
                     probability,
                 )
+                if trade_mode_normalized == "forward" and forward_mc_simulator is not None:
+                    forward_mc_start = time.perf_counter()
+                    entry_price = median_price
+                    forward_result = forward_mc_simulator.simulate(
+                        current_price=entry_price,
+                        drift=drift,
+                        sigma=sigma_per_step,
+                        dof=garch_forecast.dof,
+                        tp=tp_level,
+                        sl=sl_level,
+                        steps=steps,
+                        step_hours=step_hours,
+                    )
+                    forward_duration = time.perf_counter() - forward_mc_start
+                    durations.setdefault("monte_carlo_seconds", 0.0)
+                    durations["monte_carlo_seconds"] += forward_duration
+                    probability = forward_result.probability_hit_tp_before_sl
 
             horizon_payload.append(
                 HorizonForecast(
@@ -590,6 +618,7 @@ class ForecastEngine:
             timeframe=timeframe,
             horizons=horizon_payload,
             use_montecarlo=use_montecarlo,
+            trade_mode=trade_mode_normalized,
         )
         if trajectory_recorder is not None:
             result_payload["trajectories"] = trajectory_recorder.to_payload()

@@ -56,8 +56,12 @@ class RiskEngine:
         timeframe: str,
         horizons: List[HorizonForecast],
         use_montecarlo: bool,
+        trade_mode: str = "spot",
     ) -> Dict[str, object]:
         """Return the final structured JSON payload expected by the client."""
+        trade_mode_normalized = str(trade_mode or "spot").strip().lower()
+        if trade_mode_normalized not in {"spot", "forward"}:
+            raise ValueError("trade_mode must be one of: spot, forward")
         payload = {
             "symbol": symbol,
             "asOf": as_of,
@@ -68,28 +72,38 @@ class RiskEngine:
 
         for horizon in horizons:
             direction = "long" if horizon.median >= horizon.last_price else "short"
+            if trade_mode_normalized == "forward":
+                entry_price = horizon.median
+                entry_type = "conditional_forecast"
+                entry_method = "median"
+            else:
+                entry_price = horizon.last_price
+                entry_type = "market"
+                entry_method = "last_price"
             if direction == "long":
                 tp = horizon.p80
                 sl = horizon.p20
-                denominator = max(horizon.median - sl, 1e-9)
-                risk_reward = (tp - horizon.median) / denominator
             else:
                 tp = horizon.p20
                 sl = horizon.p80
+            if trade_mode_normalized == "forward":
+                denominator = max(abs(entry_price - sl), 1e-9)
+                risk_reward = abs(tp - entry_price) / denominator
+            elif direction == "long":
+                denominator = max(horizon.median - sl, 1e-9)
+                risk_reward = (tp - horizon.median) / denominator
+            else:
                 denominator = max(sl - horizon.median, 1e-9)
                 risk_reward = (horizon.median - tp) / denominator
 
             probability = horizon.probability_hit_tp_before_sl
             if probability is None:
                 span = max(horizon.p80 - horizon.p20, 1e-9)
+                reference = entry_price if trade_mode_normalized == "forward" else horizon.median
                 if direction == "long":
-                    probability = max(
-                        0.0, min(1.0, (horizon.p80 - horizon.median) / span)
-                    )
+                    probability = max(0.0, min(1.0, (horizon.p80 - reference) / span))
                 else:
-                    probability = max(
-                        0.0, min(1.0, (horizon.median - horizon.p20) / span)
-                    )
+                    probability = max(0.0, min(1.0, (reference - horizon.p20) / span))
 
             confidence = self._confidence(horizon.dof)
             position_size = self._position_size(horizon.sigma)
@@ -98,6 +112,10 @@ class RiskEngine:
                 {
                     "h": horizon.horizon_label,
                     "direction": direction,
+                    "trade_mode": trade_mode_normalized,
+                    "entry_price": entry_price,
+                    "entry_type": entry_type,
+                    "entry_method": entry_method,
                     "forecast": {
                         "medianPrice": horizon.median,
                         "p20": horizon.p20,

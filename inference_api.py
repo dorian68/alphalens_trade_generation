@@ -358,6 +358,13 @@ def handle_forecast(
             options = ", ".join(sorted(MODEL_TYPES.keys()))
             errors.append(f"model_type must be one of: {options}")
 
+    trade_mode = "spot"
+    trade_mode_raw = payload.get("trade_mode")
+    if trade_mode_raw is not None:
+        trade_mode = str(trade_mode_raw).strip().lower()
+        if trade_mode not in {"spot", "forward"}:
+            errors.append("trade_mode must be one of: spot, forward")
+
     if errors:
         return 400, build_error_payload(
             status="invalid_request",
@@ -373,6 +380,7 @@ def handle_forecast(
         "use_montecarlo": use_montecarlo,
         "paths": paths,
         "model_type": model_type,
+        "trade_mode": trade_mode,
         "include_predictions": include_predictions,
         "include_metadata": include_metadata,
         "include_model_info": include_model_info,
@@ -438,6 +446,7 @@ def handle_forecast(
             horizons=horizons,
             paths=paths,
             use_montecarlo=use_montecarlo,
+            trade_mode=trade_mode,
             show_progress=False,
             mean_model_override=mean_model,
             vol_model_override=vol_model,
