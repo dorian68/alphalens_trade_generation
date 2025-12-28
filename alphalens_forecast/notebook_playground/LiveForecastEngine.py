@@ -21,7 +21,7 @@ engine = ForecastEngine(config=config, data_provider=data_provider, model_router
 
 # 3. Run a live forecast for a symbol/timeframe
 result = engine.forecast(
-    symbol="XAU/USD",
+    symbol="EUR/USD",
     timeframe="15min",
     horizons=[4, 6, 8],
     paths=config.monte_carlo.paths,

@@ -28,7 +28,7 @@ class EGARCHForecast:
     variance: pd.Series
     dof: float
     skew: float
-    method: str = "analytic"
+    method: str = "simulation"
 
 
 class EGARCHVolModel:
@@ -69,7 +69,7 @@ class _VolatilityEngine:
         self._last_sigma: float = VOL_FLOOR
         self._vol_ceiling: float = VOL_CEILING
         self._realized_series: Optional[pd.Series] = None
-        self._dof: float = 6.0
+        self._dof: float = 3.0
         self._skew: float = 0.0
         self._scale = SCALE_FACTOR
 
@@ -279,7 +279,7 @@ class _VolatilityEngine:
     def _record_distribution_stats(self) -> None:
         distribution = getattr(self._result, "distribution", None)
         self._dof = float(getattr(distribution, "nu", 6.0)) if distribution is not None else 6.0
-        self._skew = float(getattr(distribution, "skew", 0.0)) if distribution is not None else 0.0
+        self._skew = float(getattr(distribution, "skew", -0.8)) if distribution is not None else -0.8
 
     def _log_model_selection(self, result, label: str) -> None:
         params = getattr(result, "params", pd.Series(dtype=float))

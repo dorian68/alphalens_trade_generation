@@ -37,6 +37,7 @@ AlphaLens Forecast solves end-to-end intraday swing forecasting:
 - **Volatility-aware Monte Carlo:** Monte Carlo simulator (`alphalens_forecast/core/montecarlo.py`) leverages EGARCH sigma paths and Student-t draws to compute hit probabilities and quantiles.
 - **Full diagnostics:** `TrajectoryRecorder` for per-horizon paths, walk-forward backtests (`alphalens_forecast/backtesting.py`), and PDF-ready performance reports (`alphalens_forecast/reporting`).
 - **Risk orchestration:** `alphalens_forecast/core/risk_engine.py` produces ready-to-trade payloads with risk-reward, probability of success, and volatility-scaling sizing.
+- **TP/SL analysis helpers:** `alphalens_forecast/risk/sl_tp_analysis.py` exposes quantile-based SL/TP, sensitivity sweeps, optional Monte Carlo consistency checks, and interpretability metrics.
 - **Cache-first data access:** The `DataProvider` keeps `alphalens_forecast/data/cache/{symbol}/{timeframe}.csv` synced, so CLI calls stay cheap and reproducible.
 
 ## Tech Stack
@@ -51,6 +52,7 @@ See `requirements.txt` for exact versions; GPU acceleration is optional (`TORCH_
 ```
 alphalens_forecast/
 ├── core/                 # Feature engineering, Monte Carlo, risk, volatility helpers
+├── risk/                 # TP/SL analysis helpers (quantiles, sensitivity, interpretability)
 ├── data/                 # Twelve Data client and caching provider
 ├── forecasting.py        # ForecastEngine orchestration + forecast_from_series
 ├── backtesting.py        # Trajectory recorder and walk-forward evaluation
@@ -209,6 +211,31 @@ Saved artifacts are loaded automatically by `ModelRouter` when the CLI runs. Com
 - `forecast_from_series` lets you bypass the data provider and supply a pre-aligned pandas `Series` (e.g., Kaggle BTC dataset). You can pass pre-fitted models (`mean_model`, `vol_model`) or let it fit on the fly.
 - `TrajectoryRecorder` + `evaluate_trajectory` (see `alphalens_forecast/test.py`) show how to inspect holdout windows, plot predicted vs realised prices, and compute RMSE/MAE/direction accuracy per horizon.
 - Utilities in `alphalens_forecast/utils` include `ModelStore` (persist artifacts & manifests), `series_to_price_frame`/`align_series_to_timeframe`, and a lightweight Twelve Data REST client.
+
+TP/SL analysis helpers live in `alphalens_forecast/risk/sl_tp_analysis.py` for quantile-based SL/TP, sensitivity sweeps, optional Monte Carlo checks, and interpretability helpers.
+
+```python
+from alphalens_forecast.risk.sl_tp_analysis import (
+    compute_sl_tp_from_quantiles,
+    analyze_sl_tp_sensitivity,
+)
+
+sl_tp = compute_sl_tp_from_quantiles(
+    last_price=last_price,
+    median_log_price=median_log,
+    sigma_h=sigma_h,
+    dof=dof,
+    direction="long",
+    q_low=0.2,
+    q_high=0.8,
+)
+
+sweep = analyze_sl_tp_sensitivity(
+    {"last_price": last_price, "median_log_price": median_log, "sigma_h": sigma_h, "dof": dof, "horizon": steps},
+    vary="dof",
+    grid=[4, 6, 8, 12],
+)
+```
 
 ## Data Provider & Artifacts
 - Default cache: `alphalens_forecast/data/cache/{symbol}/{timeframe}.csv`. Override with `--data-cache-dir` or `ALPHALENS_DATA_CACHE`.

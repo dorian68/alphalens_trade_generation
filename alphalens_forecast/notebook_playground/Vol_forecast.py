@@ -67,7 +67,7 @@ plt.tight_layout()
 plt.show()
 
 # %%
-horizon = 3000  # nb de pas à prévoir
+horizon = 30  # nb de pas à prévoir
 forecast = normal_result.forecast(horizon=horizon, reindex=False)
 sigma = np.sqrt(forecast.variance.iloc[-1]) / 1000  # tu avais multiplié les returns par 1000, donc on redivise
 
@@ -170,8 +170,11 @@ plt.show()
 
 from alphalens_forecast.forecasting import compute_student_t_quantiles
 
-d_student = compute_student_t_quantiles(15,sigma=0.02,dof=5)
+d_student = compute_student_t_quantiles(15,sigma=0.02,dof=5,skew=0.5)
+print(d_student)
 
 
 
 # %%
+
+

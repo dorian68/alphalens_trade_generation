@@ -186,6 +186,8 @@ def compute_student_t_quantiles(
     q15_log = median_log + dist.ppf(0.15) * sigma
     q50_log = median_log
     q85_log = median_log + dist.ppf(0.85) * sigma
+    print(f"q15_log: {float(np.exp(q15_log))} and q15 knowing its 2 times sigma: {float(np.exp(median_log + dist.ppf(0.15) * 2 * sigma))} ")
+    print(f"q85_log: {float(np.exp(q85_log))} and q85 knowing its 2 times sigma: {float(np.exp(median_log + dist.ppf(0.85) * 2 * sigma))} ")
     return {
         "p20": float(np.exp(q15_log)),
         "p50": float(np.exp(q50_log)),
