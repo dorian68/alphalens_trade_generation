@@ -286,6 +286,7 @@ import numpy as np
 
 from alphalens_forecast.core import MonteCarloSimulator
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 
 # ============================================================
@@ -320,6 +321,7 @@ def compute_sl_price(
     Compute an economic stop-loss expressed as a multiple of volatility.
     """
     sigma_ref = float(np.mean(ctx.sigma))
+    # print(f"sl price is {ctx.current_price * (1.0 - sl_sigma * sigma_ref)} and current price is {ctx.current_price}, sl sigma is {sl_sigma}, sigma ref is {sigma_ref}")
     return ctx.current_price * (1.0 - sl_sigma * sigma_ref)
 
 
@@ -336,8 +338,7 @@ def find_tp_for_target_prob(
     tp_min_sigma: float = 0.05,
     tp_max_sigma: float = 5.0,
     tol: float = 1e-3,
-    max_iter: int = 40,
-    output=None
+    max_iter: int = 40
 ) -> Optional[float]:
     """
     Find the maximal TP price such that:
@@ -389,42 +390,39 @@ def find_tp_for_target_prob(
         # print(f"  -> TP range = {abs(tp_high - tp_low) / ctx.current_price}")
         if abs(tp_high - tp_low) / ctx.current_price < tol:
             break
-        if output is not None:
-            return mc_result.expected_pnl
-    return best_tp
+    return best_tp, mc_result.expected_pnl
 
 
 # ============================================================
 # 4) Example usage (script entry point)
 # ============================================================
 
-def gbl_function(current_price, sl_sigma, target_prob, mc, sigma=0.00015, output=None):
+def gbl_function(current_price, sl_sigma, target_prob, mc, sigma=0.00015):
     ctx = TradeContext(
         current_price=current_price,
         drift=0.0,
-        sigma=sigma,
+        sigma=0.003834107612171475,
         dof=3.0,
-        skew=-0.35,
+        skew=-0.2598382021455602,
         steps=96,
         step_hours=1,
     )
     # print(f"current price is {ctx.current_price}")
 
     sl_price = compute_sl_price(ctx, sl_sigma)
+    scn_pnls = []
 
-    tp_price = find_tp_for_target_prob(
+    tp_price, scn_pnl = find_tp_for_target_prob(
         mc,
         ctx,
         sl_price=sl_price,
         target_prob=target_prob,
-        output=output,
     )
+    if scn_pnl is not None:
+        scn_pnls.append(scn_pnl)
 
     if tp_price is None:
         return np.nan
-
-    if output is not None:
-        return tp_price
 
     return (
         (tp_price - ctx.current_price)
@@ -437,7 +435,7 @@ def gbl_function(current_price, sl_sigma, target_prob, mc, sigma=0.00015, output
 if __name__ == "__main__":
 
     mc = MonteCarloSimulator(
-    paths=1000,
+    paths=500,
     seed=34,
     show_progress=False,
     debug=True,
@@ -451,10 +449,16 @@ if __name__ == "__main__":
     # steps=96,
     # step_hours=0.25,
 
-    x = np.linspace(0.10, 0.99, 10) # target_prob
-    y = np.linspace(0.02, 10.0, 10) # sl_sigma
+    x = np.linspace(0.10, 0.99, 60) # target_prob
+    y = np.linspace(0.02, 10.0, 20) # sl_sigma
     X, Y = np.meshgrid(x, y)
-    Z = np.array([[gbl_function(1.77893, sl_sigma=y_val, target_prob=x_val, mc=mc,sigma=0.00035,output="pnl") for x_val in x] for y_val in y])
+    Z = np.array([
+        [
+        
+        gbl_function(1.176893, sl_sigma=y_val, target_prob=x_val, mc=mc,sigma=0.00096) 
+        
+        for x_val in x] 
+        for y_val in tqdm(y,desc="avancement de y")])
 
     from matplotlib import colors
 
@@ -480,4 +484,157 @@ if __name__ == "__main__":
 
     fig.colorbar(surf, shrink=0.6, aspect=12, label="take-profit (sigma)")
     plt.show()
+# %%
+import importlib
+import sys
+from pathlib import Path
+import pandas as pd
+
+# importlib.reload(ts_utils)
+sys.path.append(r"C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
+
+
+from alphalens_forecast.evaluation import load_model, test_model, time_split, plot_forecast_vs_real
+from alphalens_forecast.data import DataProvider
+
+PROJECT_ROOT = Path(r"C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
+
+frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/EUR_USD/15min.csv", parse_dates=["datetime"]).set_index("datetime")
+vol_annual = frame["log_return"].rolling(96).std() * np.sqrt(96 * 252)
+print(np.mean(vol_annual))
+
+vol_daily = frame["log_return"].rolling(96).std()
+print(np.mean(vol_daily))
+
+vol_daily_2024 = frame["log_return"].loc["2024"].rolling(96).std()
+print(np.max(vol_daily_2024))
+
+vol_daily_2023 = frame["log_return"].loc["2023"].rolling(96).std()
+print(np.max(vol_daily_2023))
+
+vol_daily_2022 = frame["log_return"].loc["2022"].rolling(96).std()
+print(np.max(vol_daily_2022))
+
+# %%
+
+import multiprocessing as mp
+import alphalens_forecast.core.montecarlo as mc
+import time
+
+def mc_heavy(nb_paths: int):
+    simulator = mc.MonteCarloSimulator(
+        paths=nb_paths,
+        seed=42,
+        show_progress=False,
+        debug=False,
+    )
+    result = simulator.simulate(
+        current_price=1.078,
+        drift=0.0,
+        sigma=0.0012,
+        dof=8.0,
+        skew=0.0,
+        tp=1.085,
+        sl=1.070,
+        steps=96,
+        step_hours=0.25,
+    )
+    return result
+
+def heavy_task(size:int) -> None:
+    for i in range(size):
+        _ = i ** 2
+
+# %%
+# ============================================================
+#                   Multiprocessing test
+# ============================================================
+
+
+
+if __name__ == "__main__":
+
+
+    size = 10**7
+    a = time.time()
+    rs = mc_heavy(size)
+    b = time.time() - a
+    print("Les processus sont terminés")
+    print(f"Temps d'exécution séquentiel: {b} secondes")
+
+    n = 20
+    a = time.time()
+    size_n = size // n
+    with mp.Pool(processes=n) as pool:
+        result = pool.map(mc_heavy, [size_n] * n)
+
+    print("Les processus sont terminés")
+    b = time.time()
+    print(f"Temps d'exécution multiprocessing: {b - a} secondes")
+
+# %%
+
+import multiprocessing as mp
+import alphalens_forecast.core.montecarlo as mc
+import time
+
+if __name__ == "__main__":
+
+    q = mp.Queue()
+
+    size_tot = 1000
+    n_workers = 20
+
+    processes = [
+        mp.Process(target=mc_heavy, args=(size_tot//n_workers,q,)) for i in range(n_workers)
+    ]
+
+    start_time = time.time()
+
+    for p in processes:
+        p.start()
+
+    for p in processes:
+        p.join()
+
+    end_time = time.time()
+    print("Les processus sont terminés"
+          f"Temps d'exécution multiprocessing: {end_time - start_time} secondes")
+    result = [q.get() for _ in processes]
+    end_time = time.time()
+    print(f"les résultats sont récupérés au bout de : {end_time - start_time} secondes")
+
+# %%
+# ============================================================
+#                        Compute skew
+# ============================================================
+
+import numpy as np
+import sys
+from scipy.stats import skew
+from pathlib import Path
+import pandas as pd
+# importlib.reload(ts_utils)
+sys.path.append(r"C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
+
+
+from alphalens_forecast.evaluation import load_model, test_model, time_split, plot_forecast_vs_real
+from alphalens_forecast.data import DataProvider
+
+PROJECT_ROOT = Path(r"C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
+
+frame = pd.read_csv( r"C:\Users\Labry\Documents\ALPHALENS_PRJOECT_FORECAST\alphalens_trade_generation\alphalens_forecast\data\cache\BTC_USD\1h.csv", parse_dates=["datetime"]).set_index("datetime")
+# frame["log_return"] = np.log(frame["close"]).diff()
+# frame = frame.dropna()
+frame = frame.loc["2025"]
+
+skew_simple = skew(frame["log_return"])
+print(f"Skew simple: {skew_simple}")
+
+win = 96  # 1 journée de 15min (24h)
+frame["vol_15m"] = frame["log_return"].rolling(win).std()
+
+print(frame["vol_15m"].iloc[-1])
+
+
 # %%

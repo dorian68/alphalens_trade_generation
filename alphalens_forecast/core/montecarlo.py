@@ -222,3 +222,54 @@ class MonteCarloSimulator:
             final_prices=final_prices,
             debug=debug_info,
         )
+
+    def simulate_paths(
+        self,
+        *,
+        current_price: float,
+        drift: float,
+        sigma: Union[float, np.ndarray],
+        dof: float,
+        skew: float,
+        steps: int,
+        step_hours: float,
+    ) -> np.ndarray:
+        """
+        Generate Monte Carlo price paths WITHOUT TP/SL logic.
+        Shape: (paths, steps)
+        """
+
+        if current_price <= 0:
+            raise ValueError("Prices must be strictly positive.")
+        if steps <= 0:
+            raise ValueError("Simulation requires positive steps.")
+        if dof <= 2:
+            raise ValueError("Student-t dof must exceed 2.")
+
+        if isinstance(sigma, (list, tuple, np.ndarray)):
+            sigma_array = np.asarray(sigma, dtype=float)
+            if sigma_array.size != steps:
+                raise ValueError("Sigma path length must match steps.")
+        else:
+            sigma_array = np.full(steps, float(sigma))
+
+        scaled_sigma = sigma_array * np.sqrt(step_hours)
+        t_scale = np.sqrt((dof - 2.0) / dof)
+
+        raw = self._rng.standard_t(dof, size=(self.paths, steps))
+
+        if skew != 0.0:
+            raw = np.where(
+                raw >= 0.0,
+                raw * (1.0 + skew),
+                raw * (1.0 - skew),
+            )
+
+        raw = (raw - np.mean(raw)) / np.std(raw)
+        shocks = raw * t_scale
+
+        log_returns = drift * step_hours + scaled_sigma * shocks
+        cumulative = np.cumsum(log_returns, axis=1)
+
+        prices = current_price * np.exp(cumulative)
+        return prices
