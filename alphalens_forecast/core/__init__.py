@@ -11,6 +11,11 @@ from alphalens_forecast.core.feature_engineering import (
 )
 from alphalens_forecast.core.montecarlo import MonteCarloResult, MonteCarloSimulator
 from alphalens_forecast.core.risk_engine import HorizonForecast, RiskEngine
+from alphalens_forecast.core.target_prob_curve import (
+    TPFindConfig,
+    TargetProbSurface,
+    TargetProbabilityCurve,
+)
 from alphalens_forecast.core.volatility_bridge import (
     VolatilityForecast,
     annualize_volatility,
@@ -33,6 +38,9 @@ __all__ = [
     "MonteCarloSimulator",
     "HorizonForecast",
     "RiskEngine",
+    "TPFindConfig",
+    "TargetProbSurface",
+    "TargetProbabilityCurve",
     "VolatilityForecast",
     "annualize_volatility",
     "deannualize_volatility",
