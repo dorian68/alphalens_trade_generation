@@ -186,7 +186,7 @@ if __name__ == "__main__":
     Z = np.array([
         [
         
-        gbl_function(1.176893, sl_sigma=y_val, target_prob=x_val, mc=mc,sigma=0.071) 
+        gbl_function(1.176893, sl_sigma=y_val, target_prob=x_val, mc=mc,sigma=0.00096) 
         
         for x_val in x] 
         for y_val in tqdm(y,desc="avancement de y")])
@@ -215,4 +215,3 @@ if __name__ == "__main__":
 
     fig.colorbar(surf, shrink=0.6, aspect=12, label="take-profit (sigma)")
     plt.show()
-# %%

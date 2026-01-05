@@ -419,6 +419,7 @@ class ForecastEngine:
         sigma_path = garch_forecast.sigma
         variance_path = garch_forecast.variance
         forecast_method = getattr(garch_forecast, "method", "unknown")
+        mc_skew = float(garch_forecast.skew)
         logger.info(
             "EGARCH forecast produced in %.2fs | method=%s | sigma_range=(%.6f, %.6f)",
             durations["garch_forecast_seconds"],
@@ -555,6 +556,7 @@ class ForecastEngine:
                     drift=drift,
                     sigma=sigma_per_step,
                     dof=garch_forecast.dof,
+                    skew=mc_skew,
                     tp=tp_level,
                     sl=sl_level,
                     steps=steps,
@@ -581,6 +583,7 @@ class ForecastEngine:
                         drift=drift,
                         sigma=sigma_per_step,
                         dof=garch_forecast.dof,
+                        skew=mc_skew,
                         tp=tp_level,
                         sl=sl_level,
                         steps=steps,

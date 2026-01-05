@@ -42,7 +42,7 @@ class RunConfig:
     seed: Optional[int] = None
     show_progress: bool = False
     dof: float = 5.0
-    skew: float = 0.0
+    skew: Optional[float] = None
     entry_price: Optional[float] = None
     sigma_ref: Optional[float] = None
     drift_per_step: Optional[float] = None
@@ -69,13 +69,13 @@ class RunConfig:
 
 
 RUN_CONFIG = RunConfig(
-    symbol="EUR/USD",
+    symbol="XLM/USD",
     timeframe="15min",
     horizon_hours=72,
     paths=1000,
     output=Path("tp_surface.npz"),
     plot=True,
-    skew=-0.35,
+    # skew=-0.25,
 )
 
 
@@ -154,7 +154,7 @@ def _resolve_entry_price(frame, config: RunConfig) -> float:
     return entry_price
 
 
-def _estimate_return_stats(frame, config: RunConfig, step_hours: float) -> tuple[float, float, float]:
+def _estimate_return_stats(frame, config: RunConfig, step_hours: float) -> tuple[float, float, float, float]:
     log_returns = get_log_returns(frame)
     log_returns = log_returns.replace([np.inf, -np.inf], np.nan).dropna()
     if log_returns.empty:
@@ -163,9 +163,15 @@ def _estimate_return_stats(frame, config: RunConfig, step_hours: float) -> tuple
     sigma_per_step = float(config.sigma_ref) if config.sigma_ref is not None else float(log_returns.std())
     if not np.isfinite(sigma_per_step) or sigma_per_step <= 0:
         raise ValueError("sigma_ref must be positive and finite.")
+    if config.skew is None:
+        skew = float(log_returns.skew(skipna=True))
+    else:
+        skew = float(config.skew)
+    if not np.isfinite(skew):
+        skew = 0.0
     drift_per_hour = drift_per_step / step_hours
     sigma_per_hour = sigma_per_step / np.sqrt(step_hours)
-    return drift_per_hour, sigma_per_hour, sigma_per_step
+    return drift_per_hour, sigma_per_hour, sigma_per_step, skew
 
 
 def _simulate_price_paths(
@@ -174,6 +180,7 @@ def _simulate_price_paths(
     entry_price: float,
     drift_per_hour: float,
     sigma_per_hour: float,
+    skew: float,
     steps: int,
     step_hours: float,
 ) -> np.ndarray:
@@ -187,7 +194,7 @@ def _simulate_price_paths(
         drift=drift_per_hour,
         sigma=sigma_per_hour,
         dof=config.dof,
-        skew=config.skew,
+        skew=skew,
         steps=steps,
         step_hours=step_hours,
     )
@@ -201,7 +208,7 @@ def run(config: RunConfig) -> np.ndarray:
 
     frame = _load_price_frame(config, app_config, symbol, timeframe)
     entry_price = _resolve_entry_price(frame, config)
-    drift_per_hour, sigma_per_hour, sigma_ref = _estimate_return_stats(frame, config, step_hours)
+    drift_per_hour, sigma_per_hour, sigma_ref, skew = _estimate_return_stats(frame, config, step_hours)
     print(f"drift_per_hour, sigma_per_hour, sigma_ref = ({drift_per_hour}, {sigma_per_hour}, {sigma_ref})")
 
     prices = _simulate_price_paths(
@@ -209,6 +216,7 @@ def run(config: RunConfig) -> np.ndarray:
         entry_price=entry_price,
         drift_per_hour=drift_per_hour,
         sigma_per_hour=sigma_per_hour,
+        skew=skew,
         steps=steps,
         step_hours=step_hours,
     )

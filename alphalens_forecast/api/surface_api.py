@@ -34,7 +34,7 @@ class SurfaceRequest(BaseModel):
     steps: Optional[int] = Field(default=None, gt=0)
     paths: int = Field(default=3000, gt=0)
     dof: float = Field(default=3.0, gt=2.0)
-    skew: float = 0.0
+    skew: Optional[float] = None
     direction: Literal["long", "short"] = "long"
     target_prob: RangeSpec
     sl_sigma: RangeSpec
@@ -123,7 +123,10 @@ def _resolve_entry_price(frame) -> float:
     return entry_price
 
 
-def _estimate_sigma_ref(frame) -> float:
+def _estimate_sigma_ref_and_skew(
+    frame,
+    requested_skew: Optional[float],
+) -> tuple[float, float]:
     log_returns = get_log_returns(frame)
     log_returns = log_returns.replace([np.inf, -np.inf], np.nan).dropna()
     if log_returns.empty:
@@ -131,7 +134,13 @@ def _estimate_sigma_ref(frame) -> float:
     sigma_ref = float(log_returns.std())
     if not np.isfinite(sigma_ref) or sigma_ref <= 0:
         raise HTTPException(status_code=400, detail="sigma_ref must be positive and finite.")
-    return sigma_ref
+    if requested_skew is None:
+        skew = float(log_returns.skew(skipna=True))
+    else:
+        skew = float(requested_skew)
+    if not np.isfinite(skew):
+        skew = 0.0
+    return sigma_ref, skew
 
 
 def _save_surface(surface, output_path: Optional[str]) -> None:
@@ -180,7 +189,7 @@ def build_surface(request: SurfaceRequest) -> SurfaceResponse:
 
     frame = _load_price_frame(request.symbol, request.timeframe)
     entry_price = _resolve_entry_price(frame)
-    sigma_ref = _estimate_sigma_ref(frame)
+    sigma_ref, skew = _estimate_sigma_ref_and_skew(frame, request.skew)
 
     drift_per_hour = 0.0
     sigma_per_hour = sigma_ref / np.sqrt(step_hours)
@@ -196,7 +205,7 @@ def build_surface(request: SurfaceRequest) -> SurfaceResponse:
         drift=drift_per_hour,
         sigma=sigma_per_hour,
         dof=request.dof,
-        skew=request.skew,
+        skew=skew,
         steps=steps,
         step_hours=step_hours,
     )
