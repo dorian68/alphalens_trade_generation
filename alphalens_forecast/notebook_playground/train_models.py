@@ -15,7 +15,6 @@ from alphalens_forecast.data import DataProvider
 from alphalens_forecast.evaluation import load_model, test_model, time_split, plot_forecast_vs_real
 
 provider = DataProvider()
-# frame = provider.load_data("EUR/USD", "15min", refresh=True, max_points=500000)
 
 PROJECT_ROOT = Path("C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphalens_trade_generation")
 # PROJECT_ROOT = Path("C:\\Users\\Labry\\.cache\\kagglehub\\datasets\\mczielinski\\bitcoin-historical-data\\versions\\454")
@@ -39,14 +38,16 @@ print("---- Training just started ----")
 
 
 # symbol = "EUR/USD"
-asset_list = ["AUD/USD","EUR/USD","BTC/USD","ETH/USD","XAU/USD","XLM/USD"]
+# asset_list = ["ETH/USD","XAU/USD","XLM/USD","BTC/USD",]
+asset_list = ["EUR/USD",]
 for symbol in asset_list:
-    for timeframe in ("15min","30min"):
+    for timeframe in ("15min",):
+        frame = provider.load_data(symbol, timeframe, refresh=True,)
         train_nhits(symbol, timeframe, model_router=router,device=DEVICE,price_frame=frame)
-        train_neuralprophet(symbol, timeframe, model_router=router,device=DEVICE)
+        train_neuralprophet(symbol, timeframe, model_router=router,device=DEVICE,price_frame=frame)
         train_prophet(symbol, timeframe, model_router=router,device=DEVICE,price_frame=frame)
-        # train_egarch(symbol, timeframe, model_router=router,price_frame=frame)
+        train_egarch(symbol, timeframe, model_router=router,price_frame=frame)
 
 print("---- Training just ended ----")
 
-# %%
+# %% 

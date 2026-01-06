@@ -129,6 +129,20 @@ def summarize_mean_model(model: BaseForecaster) -> Dict[str, Any]:
     return summary
 
 
+def _load_provider_frame(
+    provider: DataProvider,
+    symbol: str,
+    timeframe: str,
+    refresh_data: bool,
+) -> pd.DataFrame:
+    if refresh_data:
+        try:
+            return provider.load_data(symbol, timeframe, refresh=True)
+        except TypeError:
+            logger.debug("DataProvider.load_data lacks refresh support; loading without refresh.")
+    return provider.load_data(symbol, timeframe)
+
+
 def summarize_garch_model(
     garch: EGARCHVolModel,
     forecast: EGARCHForecast,
@@ -264,6 +278,8 @@ class ForecastEngine:
         vol_model_override: Optional[EGARCHVolModel] = None,
         rolling_eval: bool = False,
         rolling_steps: Optional[int] = None,
+        force_retrain: bool = False,
+        refresh_data: bool = False,
     ) -> OrchestrationResult:
         """Run the full pipeline: data -> mean model -> vol -> Monte Carlo."""
         run_start = time.perf_counter()
@@ -283,7 +299,7 @@ class ForecastEngine:
         fetch_start = time.perf_counter()
         frame_override = price_frame.copy() if price_frame is not None else None
         if frame_override is None:
-            price_frame = self._data_provider.load_data(symbol, timeframe)
+            price_frame = _load_provider_frame(self._data_provider, symbol, timeframe, refresh_data)
             source_label = "fetched"
         else:
             price_frame = frame_override
@@ -310,7 +326,7 @@ class ForecastEngine:
 
         data_hash = compute_dataframe_hash(price_frame)
         logger.debug("Price frame hash: %s", data_hash)
-        if model_store and reuse_cached and frame_override is None:
+        if model_store and reuse_cached and frame_override is None and not force_retrain:
             reused = self._reuse_from_store(
                 model_store=model_store,
                 symbol=symbol,
@@ -349,25 +365,29 @@ class ForecastEngine:
                 timeframe,
             )
         else:
-            try:
-                mean_model = self._model_router.load_model(
-                    model_type,
-                    symbol,
-                    timeframe,
-                    device=device,
-                )
-            except FileNotFoundError:
-                mean_model = None
-            if isinstance(mean_model, NHiTSForecaster) and mean_model.requires_retraining():
-                logger.warning(
-                    "Cached NHITS model for %s @ %s was trained with covariates; retraining.",
-                    symbol,
-                    timeframe,
-                )
-                mean_model = None
+            if not force_retrain:
+                try:
+                    mean_model = self._model_router.load_model(
+                        model_type,
+                        symbol,
+                        timeframe,
+                        device=device,
+                    )
+                except FileNotFoundError:
+                    mean_model = None
+                if isinstance(mean_model, NHiTSForecaster) and mean_model.requires_retraining():
+                    logger.warning(
+                        "Cached NHITS model for %s @ %s was trained with covariates; retraining.",
+                        symbol,
+                        timeframe,
+                    )
+                    mean_model = None
             if mean_model is None:
                 trainer = MEAN_TRAINERS[model_type]
-                logger.info("Training %s model for %s [%s]", model_type, symbol, timeframe)
+                if force_retrain:
+                    logger.info("Force retrain enabled; training %s model for %s [%s]", model_type, symbol, timeframe)
+                else:
+                    logger.info("Training %s model for %s [%s]", model_type, symbol, timeframe)
                 fit_start = time.perf_counter()
                 mean_model = trainer(
                     symbol,
@@ -377,6 +397,7 @@ class ForecastEngine:
                     model_router=self._model_router,
                     device=device,
                     training_config=self._config.training,
+                    refresh_data=refresh_data,
                 )
                 durations["mean_model_fit_seconds"] = time.perf_counter() - fit_start
             else:
@@ -390,12 +411,16 @@ class ForecastEngine:
             durations["garch_fit_seconds"] = 0.0
             logger.info("Using provided volatility model for %s [%s]", symbol, timeframe)
         else:
-            try:
-                garch = self._model_router.load_egarch(symbol, timeframe)
-            except FileNotFoundError:
-                garch = None
+            if not force_retrain:
+                try:
+                    garch = self._model_router.load_egarch(symbol, timeframe)
+                except FileNotFoundError:
+                    garch = None
             if garch is None:
-                logger.info("Training EGARCH model for %s [%s]", symbol, timeframe)
+                if force_retrain:
+                    logger.info("Force retrain enabled; training EGARCH model for %s [%s]", symbol, timeframe)
+                else:
+                    logger.info("Training EGARCH model for %s [%s]", symbol, timeframe)
                 garch_fit_start = time.perf_counter()
                 garch = train_egarch(
                     symbol,
@@ -405,6 +430,7 @@ class ForecastEngine:
                     data_provider=self._data_provider,
                     model_router=self._model_router,
                     show_progress=show_progress,
+                    refresh_data=refresh_data,
                 )
                 durations["garch_fit_seconds"] = time.perf_counter() - garch_fit_start
             else:

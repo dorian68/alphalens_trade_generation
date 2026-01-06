@@ -35,6 +35,8 @@ class RunOverrides:
     trade_mode: str = "spot"
     reuse_cached: bool = False
     save_artifacts: bool = False
+    force_retrain: bool = False
+    refresh_data: bool = False
     model_dir: Optional[str] = None
     data_cache_dir: Optional[str] = None
     output_path: Optional[str] = "forecast_payload.json"
@@ -63,6 +65,8 @@ class RunSettings:
     trade_mode: str
     reuse_cached: bool
     save_artifacts: bool
+    force_retrain: bool
+    refresh_data: bool
     model_dir: Optional[Path]
     data_cache_dir: Optional[Path]
     output_path: Optional[Path]
@@ -111,6 +115,8 @@ def resolve_settings(config: AppConfig, overrides: RunOverrides) -> RunSettings:
         trade_mode=trade_mode,
         reuse_cached=bool(overrides.reuse_cached),
         save_artifacts=bool(overrides.save_artifacts),
+        force_retrain=bool(overrides.force_retrain),
+        refresh_data=bool(overrides.refresh_data),
         model_dir=_coerce_path(overrides.model_dir),
         data_cache_dir=_coerce_path(overrides.data_cache_dir),
         output_path=_coerce_path(overrides.output_path),
@@ -206,6 +212,8 @@ def run_forecast(settings: RunSettings, config: AppConfig) -> OrchestrationResul
         reuse_cached=settings.reuse_cached,
         model_store=model_store,
         show_progress=settings.show_progress,
+        force_retrain=settings.force_retrain,
+        refresh_data=settings.refresh_data,
     )
 
     if settings.save_artifacts and model_store is not None:

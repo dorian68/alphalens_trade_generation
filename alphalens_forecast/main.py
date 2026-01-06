@@ -130,6 +130,16 @@ def parse_args(config: AppConfig) -> argparse.Namespace:
         help="Reuse the most recent saved models when data hash matches.",
     )
     parser.add_argument(
+        "--force-retrain",
+        action="store_true",
+        help="Ignore cached mean/vol models and retrain before forecasting.",
+    )
+    parser.add_argument(
+        "--refresh-data",
+        action="store_true",
+        help="Force a data refresh before training/forecasting.",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default=None,
@@ -253,6 +263,8 @@ def orchestrate(
         model_store=model_store,
         show_progress=True,
         trajectory_recorder=trajectory_recorder,
+        force_retrain=args.force_retrain,
+        refresh_data=args.refresh_data,
     )
 
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import numpy as np
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
@@ -53,6 +54,7 @@ class SurfaceResponse(BaseModel):
     timeframe: str
     horizon_hours: float
     sigma_ref: float
+    atr: float
     entry_price: float
     surface: SurfacePayload
 
@@ -131,16 +133,67 @@ def _estimate_sigma_ref_and_skew(
     log_returns = log_returns.replace([np.inf, -np.inf], np.nan).dropna()
     if log_returns.empty:
         raise HTTPException(status_code=400, detail="Cannot compute returns from the provided data.")
-    sigma_ref = float(log_returns.std())
+    window = 1
+    if len(log_returns) > 1:
+        deltas = log_returns.index.to_series().diff().dropna()
+        if not deltas.empty:
+            median_delta = deltas.median()
+            if hasattr(median_delta, "total_seconds"):
+                bar_seconds = median_delta.total_seconds()
+            else:
+                try:
+                    bar_seconds = float(median_delta / np.timedelta64(1, "s"))
+                except Exception:
+                    bar_seconds = None
+            if bar_seconds and np.isfinite(bar_seconds) and bar_seconds > 0:
+                window = max(1, int((24 * 60 * 60) / bar_seconds))
+    if window > len(log_returns):
+        window = len(log_returns)
+    recent = log_returns.tail(window)
+    sigma_ref = float(recent.ewm(span=window, adjust=False).std().iloc[-1])
     if not np.isfinite(sigma_ref) or sigma_ref <= 0:
         raise HTTPException(status_code=400, detail="sigma_ref must be positive and finite.")
     if requested_skew is None:
-        skew = float(log_returns.skew(skipna=True))
+        skew = float(recent.skew(skipna=True))
     else:
         skew = float(requested_skew)
     if not np.isfinite(skew):
         skew = 0.0
     return sigma_ref, skew
+
+
+def _estimate_atr(frame) -> float:
+    required = {"high", "low", "close"}
+    missing = required.difference(frame.columns)
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail="Price frame must include 'high', 'low', and 'close' columns.",
+        )
+    highs = frame["high"].astype(float)
+    lows = frame["low"].astype(float)
+    closes = frame["close"].astype(float)
+    prev_close = closes.shift(1)
+    true_range = pd.concat(
+        [
+            (highs - lows).abs(),
+            (highs - prev_close).abs(),
+            (lows - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    true_range = true_range.replace([np.inf, -np.inf], np.nan).dropna()
+    if true_range.empty:
+        raise HTTPException(status_code=400, detail="Cannot compute ATR from the provided data.")
+
+    period = 14
+    if period > len(true_range):
+        period = len(true_range)
+    recent = true_range.tail(period)
+    atr = float(recent.mean())
+    if not np.isfinite(atr) or atr <= 0:
+        raise HTTPException(status_code=400, detail="atr must be positive and finite.")
+    return atr
 
 
 def _save_surface(surface, output_path: Optional[str]) -> None:
@@ -189,6 +242,7 @@ def build_surface(request: SurfaceRequest) -> SurfaceResponse:
 
     frame = _load_price_frame(request.symbol, request.timeframe)
     entry_price = _resolve_entry_price(frame)
+    atr = _estimate_atr(frame)
     sigma_ref, skew = _estimate_sigma_ref_and_skew(frame, request.skew)
 
     drift_per_hour = 0.0
@@ -237,6 +291,7 @@ def build_surface(request: SurfaceRequest) -> SurfaceResponse:
         timeframe=request.timeframe,
         horizon_hours=horizon_hours,
         sigma_ref=float(sigma_ref),
+        atr=float(atr),
         entry_price=float(entry_price),
         surface=payload,
     )

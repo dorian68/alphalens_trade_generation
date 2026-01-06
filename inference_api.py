@@ -348,6 +348,18 @@ def handle_forecast(
         "include_model_info",
         warnings,
     )
+    force_retrain = coerce_bool(
+        payload.get("force_retrain"),
+        False,
+        "force_retrain",
+        warnings,
+    )
+    refresh_data = coerce_bool(
+        payload.get("refresh_data"),
+        False,
+        "refresh_data",
+        warnings,
+    )
 
     model_type_raw = payload.get("model_type")
     if model_type_raw is None:
@@ -384,17 +396,30 @@ def handle_forecast(
         "include_predictions": include_predictions,
         "include_metadata": include_metadata,
         "include_model_info": include_model_info,
+        "force_retrain": force_retrain,
+        "refresh_data": refresh_data,
     }
 
     try:
         model_router = ModelRouter()
-        mean_model, vol_model, model_status = load_models(
-            config,
-            model_router,
-            symbol,
-            timeframe,
-            model_type,
-        )
+        if force_retrain:
+            device = resolve_device(config.torch_device, model_type)
+            mean_model = None
+            vol_model = None
+            model_status = {
+                "model_type": model_type,
+                "device": device,
+                "mean": {"loaded": False, "reason": "force_retrain"},
+                "vol": {"loaded": False, "reason": "force_retrain"},
+            }
+        else:
+            mean_model, vol_model, model_status = load_models(
+                config,
+                model_router,
+                symbol,
+                timeframe,
+                model_type,
+            )
     except S3UnavailableError as exc:
         return 503, build_error_payload(
             status="s3_unavailable",
@@ -411,7 +436,7 @@ def handle_forecast(
             details={"error": str(exc)},
             hint="Ensure S3-only settings and credentials are configured.",
         )
-    if mean_model is None or vol_model is None:
+    if not force_retrain and (mean_model is None or vol_model is None):
         missing = []
         if mean_model is None:
             missing.append("mean")
@@ -450,6 +475,8 @@ def handle_forecast(
             show_progress=False,
             mean_model_override=mean_model,
             vol_model_override=vol_model,
+            force_retrain=force_retrain,
+            refresh_data=refresh_data,
         )
     except TwelveDataError as exc:
         return 502, build_error_payload(

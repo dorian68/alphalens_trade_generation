@@ -421,10 +421,15 @@ frame = provider.load_data("XAU/USD", "15min", refresh=True, max_points=500000)
 from pathlib import Path
 import pandas as pd
 from matplotlib import pyplot as plt
-path_file = "/home/ubuntu/.vscode-server/projects/alphalens_forecast/ALPHALENS_FORECAST/alphalens_forecast/data/cache/EUR_USD/15min.csv"
-
+# path_file = "/home/ubuntu/.vscode-server/projects/alphalens_forecast/ALPHALENS_FORECAST/alphalens_forecast/data/cache/EUR_USD/15min.csv"
+path_file = r"C:\Users\Labry\Documents\ALPHALENS_PRJOECT_FORECAST\alphalens_trade_generation\alphalens_forecast\data\cache\EUR_USD\15min.csv"
 df_eurusd = pd.read_csv(path_file, parse_dates=["datetime"])
 plt.plot(df_eurusd["datetime"], df_eurusd["close"])
+
+window = 96
+recent = df_eurusd["log_return"].tail(window)
+sigma_ref = float(recent.ewm(span=window, adjust=False).std().iloc[-1])
+print(f"sigma ref is {sigma_ref}")
 
 #%%
 #----------------------------------------------------------------------------#
@@ -556,3 +561,4 @@ plt.show()
 
 
 # %%
+

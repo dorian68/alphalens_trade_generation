@@ -83,14 +83,28 @@ class _TrainingProgress:
         return False
 
 
-def _default_provider(provider: Optional[DataProvider]) -> DataProvider:
+def _default_provider(provider: Optional[DataProvider], *, auto_refresh: bool = False) -> DataProvider:
     if isinstance(provider, DataProvider):
         return provider
-    return DataProvider()
+    return DataProvider(auto_refresh=auto_refresh)
 
 
 def _default_router(router: Optional[ModelRouter]) -> ModelRouter:
     return router or ModelRouter()
+
+
+def _load_provider_frame(
+    provider: DataProvider,
+    symbol: str,
+    timeframe: str,
+    refresh_data: bool,
+) -> pd.DataFrame:
+    if refresh_data:
+        try:
+            return provider.load_data(symbol, timeframe, refresh=True)
+        except TypeError:
+            logger.debug("DataProvider.load_data lacks refresh support; loading without refresh.")
+    return provider.load_data(symbol, timeframe)
 
 
 def train_mean_model(
@@ -103,6 +117,7 @@ def train_mean_model(
     model_router: Optional[ModelRouter] = None,
     device: Optional[str] = None,
     training_config: Optional[TrainingConfig] = None,
+    refresh_data: bool = False,
 ) -> BaseForecaster:
     """Shared training loop for Prophet/NeuralProphet/NHiTS backends."""
     frame_override = price_frame
@@ -112,12 +127,16 @@ def train_mean_model(
     if isinstance(provider_input, pd.DataFrame):
         frame_override = provider_input
         provider_input = None
-    provider = _default_provider(provider_input)
+    provider = _default_provider(provider_input, auto_refresh=refresh_data)
     router = _default_router(model_router)
     desc = f"Training {model_type.upper()} [{symbol} @ {timeframe}]"
     with _TrainingProgress(desc, enabled=progress_enabled) as progress:
         progress.update("Loading price history")
-        frame = frame_override if frame_override is not None else provider.load_data(symbol, timeframe)
+        frame = (
+            frame_override
+            if frame_override is not None
+            else _load_provider_frame(provider, symbol, timeframe, refresh_data)
+        )
         progress.update("Preparing features")
         features = prepare_features(frame)
         model = instantiate_model(model_type, device=resolved_device)
@@ -146,6 +165,7 @@ def train_nhits(
     model_router: Optional[ModelRouter] = None,
     device: Optional[str] = None,
     training_config: Optional[TrainingConfig] = None,
+    refresh_data: bool = False,
 ) -> BaseForecaster:
     """Train/persist an N-HiTS mean model."""
     return train_mean_model(
@@ -157,6 +177,7 @@ def train_nhits(
         model_router=model_router,
         device=device,
         training_config=training_config,
+        refresh_data=refresh_data,
     )
 
 
@@ -169,6 +190,7 @@ def train_neuralprophet(
     model_router: Optional[ModelRouter] = None,
     device: Optional[str] = None,
     training_config: Optional[TrainingConfig] = None,
+    refresh_data: bool = False,
 ) -> BaseForecaster:
     """Train/persist a NeuralProphet mean model."""
     return train_mean_model(
@@ -180,6 +202,7 @@ def train_neuralprophet(
         model_router=model_router,
         device=device,
         training_config=training_config,
+        refresh_data=refresh_data,
     )
 
 
@@ -192,6 +215,7 @@ def train_prophet(
     model_router: Optional[ModelRouter] = None,
     device: Optional[str] = None,
     training_config: Optional[TrainingConfig] = None,
+    refresh_data: bool = False,
 ) -> BaseForecaster:
     """Train/persist a Prophet mean model."""
     return train_mean_model(
@@ -203,6 +227,7 @@ def train_prophet(
         model_router=model_router,
         device=device,
         training_config=training_config,
+        refresh_data=refresh_data,
     )
 
 
@@ -215,11 +240,16 @@ def train_tft(
     model_router: Optional[ModelRouter] = None,
     device: Optional[str] = None,
     training_config: Optional[TrainingConfig] = None,
+    refresh_data: bool = False,
 ) -> BaseForecaster:
     """Train/persist a TFT sequence model."""
-    provider = _default_provider(data_provider)
+    provider = _default_provider(data_provider, auto_refresh=refresh_data)
     router = _default_router(model_router)
-    frame = price_frame if price_frame is not None else provider.load_data(symbol, timeframe)
+    frame = (
+        price_frame
+        if price_frame is not None
+        else _load_provider_frame(provider, symbol, timeframe, refresh_data)
+    )
     features = prepare_features(frame)
     resolved_device = _resolve_training_device(device)
     model = instantiate_model("tft", device=resolved_device)
@@ -244,6 +274,7 @@ def train_egarch(
     data_provider: Optional[DataProvider] = None,
     model_router: Optional[ModelRouter] = None,
     show_progress: bool = True,
+    refresh_data: bool = False,
 ) -> EGARCHVolModel:
     """
     Train an EGARCH model for the given book.
@@ -253,12 +284,16 @@ def train_egarch(
     show_progress:
         When True, surface a tqdm spinner so long-running fits expose their status.
     """
-    provider = _default_provider(data_provider)
+    provider = _default_provider(data_provider, auto_refresh=refresh_data)
     router = _default_router(model_router)
     desc = f"Training EGARCH [{symbol} @ {timeframe}]"
     with _TrainingProgress(desc, show_progress) as progress:
         progress.update("Loading price history")
-        frame = price_frame if price_frame is not None else provider.load_data(symbol, timeframe)
+        frame = (
+            price_frame
+            if price_frame is not None
+            else _load_provider_frame(provider, symbol, timeframe, refresh_data)
+        )
 
         progress.update("Preparing residuals")
         if residuals is not None:
