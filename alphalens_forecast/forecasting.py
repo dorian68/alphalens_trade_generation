@@ -280,6 +280,8 @@ class ForecastEngine:
         rolling_steps: Optional[int] = None,
         force_retrain: bool = False,
         refresh_data: bool = False,
+        execution_price: Optional[float] = None,
+        execution_price_source: Optional[str] = None,
     ) -> OrchestrationResult:
         """Run the full pipeline: data -> mean model -> vol -> Monte Carlo."""
         run_start = time.perf_counter()
@@ -326,7 +328,13 @@ class ForecastEngine:
 
         data_hash = compute_dataframe_hash(price_frame)
         logger.debug("Price frame hash: %s", data_hash)
-        if model_store and reuse_cached and frame_override is None and not force_retrain:
+        if (
+            model_store
+            and reuse_cached
+            and frame_override is None
+            and not force_retrain
+            and execution_price is None
+        ):
             reused = self._reuse_from_store(
                 model_store=model_store,
                 symbol=symbol,
@@ -345,9 +353,29 @@ class ForecastEngine:
         last_price = float(target_series.iloc[-1])
         if last_price <= 0:
             raise ValueError("Close price must be positive to compute log transforms.")
+        # Modeling price uses the last close; execution price can be live when provided.
+        execution_price_value = last_price
+        execution_price_source_value = "close"
+        execution_price_override: Optional[float] = None
+        if execution_price is not None:
+            try:
+                execution_price_value = float(execution_price)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("execution_price must be positive and finite.") from exc
+            if not np.isfinite(execution_price_value) or execution_price_value <= 0:
+                raise ValueError("execution_price must be positive and finite.")
+            execution_price_source_value = (
+                execution_price_source if execution_price_source in {"client", "live"} else "client"
+            )
+            execution_price_override = execution_price_value
         last_log_price = float(np.log(last_price))
         as_of_ts = last_complete_ts or price_frame.index[-1]
         as_of = format_timestamp(as_of_ts)
+        spot_entry_price = execution_price_value if trade_mode_normalized == "spot" else last_price
+        if trade_mode_normalized == "spot" and use_montecarlo:
+            quantiles_anchor = spot_entry_price
+        else:
+            quantiles_anchor = last_price
 
         freq = FREQ_MAP.get(timeframe.lower())
         if freq is None:
@@ -572,13 +600,17 @@ class ForecastEngine:
             direction = "long" if median_price >= last_price else "short"
             tp_level = p80_price if direction == "long" else p20_price
             sl_level = p20_price if direction == "long" else p80_price
+            if trade_mode_normalized == "spot" and execution_price_override is not None:
+                scale = execution_price_value / last_price
+                tp_level *= scale
+                sl_level *= scale
 
             probability = None
             if use_montecarlo and mc_simulator is not None:
                 mc_start = time.perf_counter()
                 step_hours = interval_to_hours(timeframe)
                 mc_result = mc_simulator.simulate(
-                    current_price=last_price,
+                    current_price=spot_entry_price,
                     drift=drift,
                     sigma=sigma_per_step,
                     dof=garch_forecast.dof,
@@ -634,6 +666,8 @@ class ForecastEngine:
                     calibrated=True,
                     probability_hit_tp_before_sl=probability,
                     last_price=last_price,
+                    execution_price=execution_price_override,
+                    quantiles_anchor=quantiles_anchor,
                 )
             )
         durations["forecast_loop_seconds"] = time.perf_counter() - forecast_loop_start
@@ -687,6 +721,10 @@ class ForecastEngine:
             metadata["rolling_eval"] = rolling_summary
         metadata["residual_std"] = float(residuals.std(ddof=0))
         metadata["last_price"] = last_price
+        metadata["execution_price"] = execution_price_value
+        metadata["price_modeling"] = last_price
+        metadata["price_execution"] = execution_price_value
+        metadata["execution_price_source"] = execution_price_source_value
         metadata["sigma_path_min"] = float(sigma_path.min())
         metadata["sigma_path_max"] = float(sigma_path.max())
 

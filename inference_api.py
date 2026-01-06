@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import logging
 import os
 import sys
@@ -13,9 +14,10 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlunparse
 
 import pandas as pd
+import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -136,6 +138,70 @@ def parse_horizons(value: Any, default: List[int]) -> Tuple[List[int], List[Any]
         deduped.append(value_item)
 
     return deduped, invalid, False
+
+def _normalize_live_symbol(symbol: str) -> str:
+    raw = (symbol or "").strip()
+    if "/" in raw or "_" not in raw:
+        return raw
+    parts = raw.split("_")
+    if len(parts) != 2:
+        return raw
+    base, quote = parts[0].strip(), parts[1].strip()
+    if not (2 <= len(base) <= 6 and 2 <= len(quote) <= 6):
+        return raw
+    if not (base.isalnum() and quote.isalnum()):
+        return raw
+    return f"{base}/{quote}"
+
+def _resolve_price_url(base_url: str) -> str:
+    try:
+        parsed = urlparse(base_url)
+        if not parsed.netloc:
+            return "https://api.twelvedata.com/price"
+        path = parsed.path or ""
+        if "time_series" in path:
+            path = path.replace("time_series", "price")
+        else:
+            if not path.endswith("/"):
+                path += "/"
+            path += "price"
+        return urlunparse((parsed.scheme or "https", parsed.netloc, path, "", "", ""))
+    except Exception:
+        return "https://api.twelvedata.com/price"
+
+def _fetch_live_price(symbol: str, config) -> Optional[float]:
+    api_key = getattr(config.twelve_data, "api_key", "") or ""
+    if not api_key:
+        logger.warning("Live price fetch skipped: TWELVE_DATA_API_KEY is not set.")
+        return None
+    url = _resolve_price_url(getattr(config.twelve_data, "base_url", ""))
+    api_symbol = _normalize_live_symbol(symbol)
+    try:
+        response = requests.get(
+            url,
+            params={"symbol": api_symbol, "apikey": api_key},
+            timeout=10,
+        )
+        if response.status_code != 200:
+            logger.warning("Live price fetch failed (%s): %s", response.status_code, response.text)
+            return None
+        payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("Live price fetch failed: %s", exc)
+        return None
+    if isinstance(payload, dict) and payload.get("status") == "error":
+        logger.warning("Live price fetch error: %s", payload.get("message", "unknown error"))
+        return None
+    price_raw = payload.get("price") if isinstance(payload, dict) else None
+    if price_raw is None:
+        return None
+    try:
+        price = float(price_raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(price) or price <= 0:
+        return None
+    return price
 
 def inspect_model_assets(
     router: ModelRouter,
@@ -348,6 +414,30 @@ def handle_forecast(
         "include_model_info",
         warnings,
     )
+    execution_price = None
+    execution_price_source = None
+    live_price_raw = payload.get("live_price")
+    legacy_execution_raw = payload.get("execution_price")
+    if live_price_raw is not None:
+        try:
+            execution_price = float(live_price_raw)
+        except (TypeError, ValueError):
+            errors.append("live_price must be a positive number")
+        else:
+            if not math.isfinite(execution_price) or execution_price <= 0:
+                errors.append("live_price must be positive and finite")
+            else:
+                execution_price_source = "client"
+    elif legacy_execution_raw is not None:
+        try:
+            execution_price = float(legacy_execution_raw)
+        except (TypeError, ValueError):
+            errors.append("execution_price must be a positive number")
+        else:
+            if not math.isfinite(execution_price) or execution_price <= 0:
+                errors.append("execution_price must be positive and finite")
+            else:
+                execution_price_source = "client"
     force_retrain = coerce_bool(
         payload.get("force_retrain"),
         False,
@@ -385,6 +475,12 @@ def handle_forecast(
             errors=errors,
         )
 
+    if execution_price is None:
+        fetched_price = _fetch_live_price(symbol, config)
+        if fetched_price is not None:
+            execution_price = fetched_price
+            execution_price_source = "live"
+
     request_context = {
         "symbol": symbol,
         "timeframe": timeframe,
@@ -399,6 +495,10 @@ def handle_forecast(
         "force_retrain": force_retrain,
         "refresh_data": refresh_data,
     }
+    if live_price_raw is not None:
+        request_context["live_price"] = execution_price
+    if legacy_execution_raw is not None:
+        request_context["execution_price"] = execution_price
 
     try:
         model_router = ModelRouter()
@@ -477,6 +577,8 @@ def handle_forecast(
             vol_model_override=vol_model,
             force_retrain=force_retrain,
             refresh_data=refresh_data,
+            execution_price=execution_price,
+            execution_price_source=execution_price_source,
         )
     except TwelveDataError as exc:
         return 502, build_error_payload(
