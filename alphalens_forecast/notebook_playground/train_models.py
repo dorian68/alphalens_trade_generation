@@ -20,7 +20,7 @@ PROJECT_ROOT = Path("C:/Users/Labry/Documents/ALPHALENS_PRJOECT_FORECAST/alphale
 # PROJECT_ROOT = Path("C:\\Users\\Labry\\.cache\\kagglehub\\datasets\\mczielinski\\bitcoin-historical-data\\versions\\454")
 
 router = ModelRouter(PROJECT_ROOT / "models")
-frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/BTC_USD/15min.csv", parse_dates=["datetime"]).set_index("datetime")
+# frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/BTC_USD/15min.csv", parse_dates=["datetime"]).set_index("datetime")
 # frame = pd.read_csv( PROJECT_ROOT / "btcusd_1-min_data.csv", parse_dates=["Timestamp"])
 # frame.rename(columns={"Timestamp": "datetime"}, inplace=True)
 # frame.set_index("datetime", inplace=True)
@@ -28,8 +28,8 @@ frame = pd.read_csv( PROJECT_ROOT / "alphalens_forecast/data/cache/BTC_USD/15min
 # frame = df_btc
 DEVICE = "cuda"
 
-frame.rename(columns={"Close": "close"}, inplace=True)
-close_series = frame["close"].dropna()
+# frame.rename(columns={"Close": "close"}, inplace=True)
+# close_series = frame["close"].dropna()
 
 # train, valid, test = time_split(close_series)
 # print(frame.head())
@@ -41,7 +41,7 @@ print("---- Training just started ----")
 # asset_list = ["ETH/USD","XAU/USD","XLM/USD","BTC/USD",]
 asset_list = ["EUR/USD",]
 for symbol in asset_list:
-    for timeframe in ("15min",):
+    for timeframe in ("1h","4h"):
         frame = provider.load_data(symbol, timeframe, refresh=True,)
         train_nhits(symbol, timeframe, model_router=router,device=DEVICE,price_frame=frame)
         train_neuralprophet(symbol, timeframe, model_router=router,device=DEVICE,price_frame=frame)

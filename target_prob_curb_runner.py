@@ -69,13 +69,13 @@ class RunConfig:
 
 
 RUN_CONFIG = RunConfig(
-    symbol="XLM/USD",
+    symbol="BTC/USD",
     timeframe="15min",
     horizon_hours=72,
     paths=1000,
-    output=Path("tp_surface.npz"),
+    output=Path("tp_surface07_01_2026.npz"),
     plot=True,
-    # skew=-0.25,
+    skew=-0.55,
 )
 
 

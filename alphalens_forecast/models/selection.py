@@ -45,7 +45,7 @@ def select_model_type(timeframe: str) -> str:
         return "nhits"
     if minutes < 240:
         return "neuralprophet"
-    return "prophet"
+    return "nhits"
 
 
 def resolve_device(device: Optional[str], model_type: str) -> str:

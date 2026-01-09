@@ -562,3 +562,47 @@ plt.show()
 
 # %%
 
+#**********************************************************************************
+#*                                                                                * 
+#*                        TEST TARGET PROB CURB RUNNER                           *
+#*                                                                                *             
+#**********************************************************************************
+from alphalens_forecast.config import get_config                         
+from alphalens_forecast.data import DataProvider                         
+from alphalens_forecast.models import ModelRouter                        
+from alphalens_forecast.forecasting import ForecastEngine                
+                                                                        
+config = get_config()                                                    
+provider = DataProvider(config.twelve_data, auto_refresh=True)           
+router = ModelRouter()  # ou ModelRouter(Path("models")) si tu veux forcer un dossier                                                        
+                                                                        
+engine = ForecastEngine(config, provider, router)                        
+                                                                        
+symbol = "EUR/USD"                                                       
+timeframe = "15min"                                                      
+horizons = [3, 6, 12, 24]  # en heures                                   
+paths = 3000                                                             
+                                                                        
+# Charge explicitement TES modèles (optionnel, mais pratique pour forcer un type)                                                                 
+mean_model = router.load_model("nhits", symbol, timeframe)               
+vol_model = router.load_egarch(symbol, timeframe)                        
+                                                                        
+result = engine.forecast(                                                
+    symbol=symbol,                                                       
+    timeframe=timeframe,                                                 
+    horizons=horizons,                                                   
+    paths=paths,                                                         
+    use_montecarlo=True,                                                 
+    trade_mode="spot",                                                   
+    refresh_data=True,           # True = met à jour les données         
+    force_retrain=False,         # False = utilise tes modèles existants 
+    mean_model_override=mean_model,                                      
+    vol_model_override=vol_model,                                        
+    execution_price=None,        # mets un live price ici si tu veux     
+    execution_price_source=None,                                      
+)                                                                        
+                                                                        
+result = result.payload  # payload complet (TP/SL, risk, etc.)  
+
+# %%
+

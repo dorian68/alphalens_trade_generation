@@ -36,6 +36,7 @@ class SurfaceRequest(BaseModel):
     paths: int = Field(default=3000, gt=0)
     dof: float = Field(default=3.0, gt=2.0)
     skew: Optional[float] = None
+    methodology: Literal["legacy", "research"] = "legacy"
     direction: Literal["long", "short"] = "long"
     target_prob: RangeSpec
     sl_sigma: RangeSpec
@@ -56,6 +57,7 @@ class SurfaceResponse(BaseModel):
     sigma_ref: float
     atr: float
     entry_price: float
+    methodology: Optional[str] = None
     surface: SurfacePayload
 
 
@@ -162,6 +164,36 @@ def _estimate_sigma_ref_and_skew(
     return sigma_ref, skew
 
 
+def _estimate_drift_and_sigma(
+    frame: pd.DataFrame,
+    timeframe: str,
+    methodology: str,
+) -> tuple[float, float]:
+    step_hours = interval_to_hours(timeframe)
+    if methodology == "legacy":
+        sigma_ref = frame.attrs.get("_legacy_sigma_ref")
+        if sigma_ref is None:
+            sigma_ref, _ = _estimate_sigma_ref_and_skew(frame, None)
+        drift_per_hour = 0.0
+        sigma_per_hour = sigma_ref / np.sqrt(step_hours)
+        return drift_per_hour, sigma_per_hour
+    if methodology == "research":
+        log_returns = frame.attrs.get("_research_log_returns")
+        if log_returns is None:
+            log_returns = get_log_returns(frame)
+            log_returns = log_returns.replace([np.inf, -np.inf], np.nan).dropna()
+        if log_returns.empty:
+            raise HTTPException(status_code=400, detail="Cannot compute returns from the provided data.")
+        drift_per_step = float(log_returns.mean())
+        sigma_per_step = float(log_returns.std(ddof=0))
+        if not np.isfinite(sigma_per_step) or sigma_per_step <= 0:
+            raise HTTPException(status_code=400, detail="sigma_ref must be positive and finite.")
+        drift_per_hour = drift_per_step / step_hours
+        sigma_per_hour = sigma_per_step / np.sqrt(step_hours)
+        return drift_per_hour, sigma_per_hour
+    raise HTTPException(status_code=400, detail="methodology must be 'legacy' or 'research'.")
+
+
 def _estimate_atr(frame) -> float:
     required = {"high", "low", "close"}
     missing = required.difference(frame.columns)
@@ -243,10 +275,30 @@ def build_surface(request: SurfaceRequest) -> SurfaceResponse:
     frame = _load_price_frame(request.symbol, request.timeframe)
     entry_price = _resolve_entry_price(frame)
     atr = _estimate_atr(frame)
-    sigma_ref, skew = _estimate_sigma_ref_and_skew(frame, request.skew)
+    if request.methodology == "research":
+        log_returns = get_log_returns(frame)
+        log_returns = log_returns.replace([np.inf, -np.inf], np.nan).dropna()
+        if log_returns.empty:
+            raise HTTPException(status_code=400, detail="Cannot compute returns from the provided data.")
+        frame.attrs["_research_log_returns"] = log_returns
+        sigma_ref = float(log_returns.std(ddof=0))
+        if not np.isfinite(sigma_ref) or sigma_ref <= 0:
+            raise HTTPException(status_code=400, detail="sigma_ref must be positive and finite.")
+        if request.skew is None:
+            skew = float(log_returns.skew(skipna=True))
+        else:
+            skew = float(request.skew)
+        if not np.isfinite(skew):
+            skew = 0.0
+    else:
+        sigma_ref, skew = _estimate_sigma_ref_and_skew(frame, request.skew)
+        frame.attrs["_legacy_sigma_ref"] = sigma_ref
 
-    drift_per_hour = 0.0
-    sigma_per_hour = sigma_ref / np.sqrt(step_hours)
+    drift_per_hour, sigma_per_hour = _estimate_drift_and_sigma(
+        frame,
+        request.timeframe,
+        request.methodology,
+    )
 
     seed = _seed_from_request(request)
     simulator = MonteCarloSimulator(
@@ -264,7 +316,10 @@ def build_surface(request: SurfaceRequest) -> SurfaceResponse:
         step_hours=step_hours,
     )
 
-    cfg = TPFindConfig()
+    if request.methodology == "research":
+        cfg = TPFindConfig(max_iter=35, rel_tol=1e-4)
+    else:
+        cfg = TPFindConfig()
     curve = TargetProbabilityCurve(
         prices,
         entry_price=entry_price,
@@ -293,5 +348,6 @@ def build_surface(request: SurfaceRequest) -> SurfaceResponse:
         sigma_ref=float(sigma_ref),
         atr=float(atr),
         entry_price=float(entry_price),
+        methodology=request.methodology,
         surface=payload,
     )
