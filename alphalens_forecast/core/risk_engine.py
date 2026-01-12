@@ -71,11 +71,7 @@ class RiskEngine:
             "use_montecarlo": use_montecarlo,
             "horizons": [],
         }
-        if horizons:
-            execution_price = horizons[0].execution_price
-            if execution_price is None or execution_price <= 0:
-                execution_price = horizons[0].last_price
-            payload["entry_price"] = float(execution_price)
+        root_entry_price: Optional[float] = None
 
         for horizon in horizons:
             execution_price = horizon.execution_price
@@ -95,6 +91,9 @@ class RiskEngine:
                     entry_price = horizon.last_price
                     entry_method = "last_price"
                 entry_type = "market"
+            if root_entry_price is None:
+                # Root entry_price mirrors the first horizon entry_price to stay trade_mode-aligned.
+                root_entry_price = entry_price
             if direction == "long":
                 tp = horizon.p80
                 sl = horizon.p20
@@ -161,5 +160,8 @@ class RiskEngine:
                     },
                 }
             )
+
+        if root_entry_price is not None:
+            payload["entry_price"] = float(root_entry_price)
 
         return payload

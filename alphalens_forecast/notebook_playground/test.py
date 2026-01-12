@@ -580,11 +580,11 @@ engine = ForecastEngine(config, provider, router)
                                                                         
 symbol = "EUR/USD"                                                       
 timeframe = "15min"                                                      
-horizons = [3, 6, 12, 24]  # en heures                                   
+horizons = [24]  # en heures                                   
 paths = 3000                                                             
                                                                         
 # Charge explicitement TES modèles (optionnel, mais pratique pour forcer un type)                                                                 
-mean_model = router.load_model("nhits", symbol, timeframe)               
+mean_model = router.load_model("prophet", symbol, timeframe)               
 vol_model = router.load_egarch(symbol, timeframe)                        
                                                                         
 result = engine.forecast(                                                
@@ -602,7 +602,14 @@ result = engine.forecast(
     execution_price_source=None,                                      
 )                                                                        
                                                                         
-result = result.payload  # payload complet (TP/SL, risk, etc.)  
+result = result  # payload complet (TP/SL, risk, etc.)  
 
 # %%
+import matplotlib.pyplot as plt
+import numpy as np
 
+
+plt.plot(result.predictions["24h"])
+
+
+# %%

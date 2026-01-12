@@ -221,8 +221,12 @@ def _estimate_atr(frame) -> float:
     period = 14
     if period > len(true_range):
         period = len(true_range)
-    recent = true_range.tail(period)
-    atr = float(recent.mean())
+    # Wilder's RMA smoothing seeded with a simple mean.
+    atr = float(true_range.iloc[:period].mean())
+    if len(true_range) > period:
+        alpha = 1.0 / period
+        for tr in true_range.iloc[period:]:
+            atr = atr + alpha * (tr - atr)
     if not np.isfinite(atr) or atr <= 0:
         raise HTTPException(status_code=400, detail="atr must be positive and finite.")
     return atr
