@@ -15,10 +15,11 @@ AlphaLens Forecast is a hybrid trading-forecast stack that combines Prophet, Neu
 10. [Monte Carlo & Risk Controls](#monte-carlo--risk-controls)
 11. [Backtesting, Evaluation & Reporting](#backtesting-evaluation--reporting)
 12. [Custom Integrations & Utilities](#custom-integrations--utilities)
-13. [Data Provider & Artifacts](#data-provider--artifacts)
-14. [Development & Testing](#development--testing)
-15. [Troubleshooting](#troubleshooting)
-16. [License](#license)
+13. [Surface API](#surface-api)
+14. [Data Provider & Artifacts](#data-provider--artifacts)
+15. [Development & Testing](#development--testing)
+16. [Troubleshooting](#troubleshooting)
+17. [License](#license)
 
 ## Overview
 AlphaLens Forecast solves end-to-end intraday swing forecasting:
@@ -235,6 +236,21 @@ sweep = analyze_sl_tp_sensitivity(
     vary="dof",
     grid=[4, 6, 8, 12],
 )
+```
+
+## Surface API
+Run the surface API locally:
+
+```bash
+uvicorn alphalens_forecast.api.surface_api:app --reload --host 0.0.0.0 --port 8000
+```
+
+Example request with an explicit entry_price (omit entry_price to use the latest close):
+
+```bash
+curl -X POST http://localhost:8000/surface \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"EUR/USD","timeframe":"4h","horizon_hours":48,"entry_price":1.165,"target_prob":{"min":0.2,"max":0.8,"steps":7},"sl_sigma":{"min":0.5,"max":2.0,"steps":7}}'
 ```
 
 ## Data Provider & Artifacts

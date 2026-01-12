@@ -31,6 +31,7 @@ class RangeSpec(BaseModel):
 class SurfaceRequest(BaseModel):
     symbol: str
     timeframe: str
+    entry_price: Optional[float] = Field(default=None, gt=0)
     horizon_hours: Optional[float] = Field(default=None, gt=0)
     steps: Optional[int] = Field(default=None, gt=0)
     paths: int = Field(default=3000, gt=0)
@@ -118,9 +119,17 @@ def _load_price_frame(symbol: str, timeframe: str):
     return frame.sort_index()
 
 
-def _resolve_entry_price(frame) -> float:
+def _resolve_entry_price(frame, override: Optional[float] = None) -> float:
     if "close" not in frame.columns:
         raise HTTPException(status_code=400, detail="Price frame must include a 'close' column.")
+    if override is not None:
+        try:
+            entry_price = float(override)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="entry_price must be positive and finite.")
+        if not np.isfinite(entry_price) or entry_price <= 0:
+            raise HTTPException(status_code=400, detail="entry_price must be positive and finite.")
+        return entry_price
     entry_price = float(frame["close"].iloc[-1])
     if not np.isfinite(entry_price) or entry_price <= 0:
         raise HTTPException(status_code=400, detail="entry_price must be positive and finite.")
@@ -277,7 +286,7 @@ def build_surface(request: SurfaceRequest) -> SurfaceResponse:
         raise HTTPException(status_code=400, detail="sl_sigma values must be positive.")
 
     frame = _load_price_frame(request.symbol, request.timeframe)
-    entry_price = _resolve_entry_price(frame)
+    entry_price = _resolve_entry_price(frame, request.entry_price)
     atr = _estimate_atr(frame)
     if request.methodology == "research":
         log_returns = get_log_returns(frame)
