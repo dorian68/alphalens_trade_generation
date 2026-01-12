@@ -43,6 +43,8 @@ def select_model_type(timeframe: str) -> str:
     minutes = timeframe_to_minutes(timeframe)
     if minutes <= 30:
         return "nhits"
+    if minutes == 60:
+        return "nhits"
     if minutes < 240:
         return "neuralprophet"
     return "nhits"
