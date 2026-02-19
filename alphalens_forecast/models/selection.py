@@ -42,7 +42,7 @@ def select_model_type(timeframe: str) -> str:
     """Return the canonical model type for the requested timeframe."""
     minutes = timeframe_to_minutes(timeframe)
     if minutes == 60:
-        return "neuralprophet"
+        return "prophet"
     if minutes <= 30:
         return "nhits"
     if minutes <= 240:
