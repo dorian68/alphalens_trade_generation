@@ -41,13 +41,13 @@ def timeframe_to_minutes(timeframe: str) -> int:
 def select_model_type(timeframe: str) -> str:
     """Return the canonical model type for the requested timeframe."""
     minutes = timeframe_to_minutes(timeframe)
+    if minutes == 60:
+        return "neuralprophet"
     if minutes <= 30:
         return "nhits"
-    if minutes == 60:
+    if minutes <= 240:
         return "nhits"
-    if minutes < 240:
-        return "neuralprophet"
-    return "nhits"
+    return "prophet"
 
 
 def resolve_device(device: Optional[str], model_type: str) -> str:

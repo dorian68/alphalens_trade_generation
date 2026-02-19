@@ -71,7 +71,7 @@ class RunConfig:
 RUN_CONFIG = RunConfig(
     symbol="BTC/USD",
     timeframe="15min",
-    horizon_hours=72,
+    horizon_hours=96,
     paths=1000,
     output=Path("tp_surface07_01_2026.npz"),
     plot=True,
@@ -299,7 +299,7 @@ if __name__ == "__main__":
 import numpy as np                                                    
 from alphalens_forecast.core.target_prob_curve import TargetProbSurface, TargetProbabilityCurve                             
                                                                     
-data = np.load(r"C:\Users\Labry\Documents\ALPHALENS_PRJOECT_FORECAST\alphalens_trade_generation\alphalens_forecast\notebook_playground\tp_surface_2.npz")                                                      
+data = np.load(r"C:\Users\Labry\Documents\ALPHALENS_PRJOECT_FORECAST\alphalens_trade_generation\alphalens_forecast\notebook_playground\tp_surface07_01_2026.npz")                                                      
 surface = TargetProbSurface(                                          
     target_probs=data["target_probs"],                                
     sl_sigma=data["sl_sigma"],                                        

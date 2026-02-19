@@ -303,7 +303,7 @@ print("---- Training just started ----")
 
 
 # symbol = "EUR/USD"
-asset_list = ["GBP/USD","AUD/USD","BTC/USD","ETH/USD","XAU/USD","XLM/USD"]
+asset_list = ["EUR/USD","GBP/USD","AUD/USD","BTC/USD","ETH/USD","XAU/USD","XLM/USD"]
 for symbol in asset_list:
     for timeframe in ("15min","30min","1h","4h"):
         train_nhits(symbol, timeframe, model_router=router,device=DEVICE)

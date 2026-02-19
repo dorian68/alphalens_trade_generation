@@ -23,6 +23,18 @@ class ProphetForecaster(BaseForecaster):
         target: pd.Series,
         regressors: Optional[pd.DataFrame] = None,
     ) -> None:
+        # Guard against CmdStanPy tmp dir being deleted mid-session.
+        try:
+            import os
+            import tempfile
+            import cmdstanpy
+
+            if not os.path.isdir(cmdstanpy._TMPDIR):
+                cmdstanpy._TMPDIR = tempfile.mkdtemp()
+        except Exception:
+            # If anything goes wrong here, Prophet will raise a clearer error.
+            pass
+
         frame = to_prophet_frame(target)
         model = Prophet(
             weekly_seasonality=True,
