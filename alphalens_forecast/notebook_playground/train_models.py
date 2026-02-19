@@ -41,8 +41,7 @@ print("---- Training just started ----")
 asset_list = ["EUR/USD","GBP/USD","ETH/USD","XAU/USD","XLM/USD","BTC/USD",]
 # asset_list = ["XAU/USD","XLM/USD","BTC/USD",]
 for symbol in asset_list:
-    # for timeframe in ("15min","30min","1h","4h"):
-    for timeframe in ("4h",):
+    for timeframe in ("15min","30min","1h","4h"):
         frame = provider.load_data(symbol, timeframe, refresh=True,)
         train_nhits(symbol, timeframe, model_router=router,device=DEVICE,price_frame=frame)
         train_neuralprophet(symbol, timeframe, model_router=router,device=DEVICE,price_frame=frame)
