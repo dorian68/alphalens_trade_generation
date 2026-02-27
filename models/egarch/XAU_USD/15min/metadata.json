@@ -1,0 +1,14 @@
+{
+  "symbol": "XAU/USD",
+  "timeframe": "15min",
+  "model_type": "egarch",
+  "saved_at": "2026-02-27T04:11:35.857863Z",
+  "metadata": {
+    "n_observations": 213000,
+    "trained_at": "2026-02-27T04:11:35.727766Z",
+    "training_frequency": "daily"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.garch_model.EGARCHVolModel"
+}

@@ -1,0 +1,14 @@
+{
+  "symbol": "ETH/USD",
+  "timeframe": "15min",
+  "model_type": "prophet",
+  "saved_at": "2026-02-27T03:37:14.524922Z",
+  "metadata": {
+    "n_observations": 155560,
+    "trained_at": "2026-02-27T03:37:14.459403Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.prophet_model.ProphetForecaster"
+}

@@ -1,0 +1,14 @@
+{
+  "symbol": "USD/CHF",
+  "timeframe": "4h",
+  "model_type": "egarch",
+  "saved_at": "2025-12-22T18:07:26.519027Z",
+  "metadata": {
+    "n_observations": 161381,
+    "trained_at": "2025-12-22T18:07:26.394542Z",
+    "training_frequency": "daily"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.garch_model.EGARCHVolModel"
+}

@@ -1,0 +1,14 @@
+{
+  "symbol": "BTC/USD",
+  "timeframe": "15min",
+  "model_type": "nhits",
+  "saved_at": "2026-02-27T03:18:18.840414Z",
+  "metadata": {
+    "n_observations": 167127,
+    "trained_at": "2026-02-27T03:18:18.661996Z",
+    "training_frequency": "every 2 days"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.nhits_model.NHiTSForecaster"
+}

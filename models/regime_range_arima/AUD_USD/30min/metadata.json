@@ -1,0 +1,15 @@
+{
+  "symbol": "AUD/USD",
+  "timeframe": "30min",
+  "model_type": "regime_range_arima",
+  "saved_at": "2026-02-26T14:04:49.386957Z",
+  "metadata": {
+    "n_observations": 7059,
+    "trained_at": "2026-02-26T14:04:49.354214Z",
+    "regime": "RANGE",
+    "choice": "arima"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.ARIMAForecaster"
+}

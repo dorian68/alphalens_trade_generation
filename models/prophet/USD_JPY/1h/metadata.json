@@ -1,0 +1,14 @@
+{
+  "symbol": "USD/JPY",
+  "timeframe": "1h",
+  "model_type": "prophet",
+  "saved_at": "2025-12-21T23:16:30.968486Z",
+  "metadata": {
+    "n_observations": 7131,
+    "trained_at": "2025-12-21T23:16:30.958860Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.prophet_model.ProphetForecaster"
+}

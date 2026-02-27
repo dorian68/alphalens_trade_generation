@@ -1,0 +1,15 @@
+{
+  "symbol": "EUR/USD",
+  "timeframe": "4h",
+  "model_type": "regime_range_arima",
+  "saved_at": "2026-02-26T12:55:29.221554Z",
+  "metadata": {
+    "n_observations": 7310,
+    "trained_at": "2026-02-26T12:55:29.180554Z",
+    "regime": "RANGE",
+    "choice": "arima"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.ARIMAForecaster"
+}

@@ -1,0 +1,15 @@
+{
+  "symbol": "AUD/USD",
+  "timeframe": "30min",
+  "model_type": "regime_stress_kalman",
+  "saved_at": "2026-02-26T14:05:05.067011Z",
+  "metadata": {
+    "n_observations": 7059,
+    "trained_at": "2026-02-26T14:05:05.038351Z",
+    "regime": "STRESS_CHOP",
+    "choice": "kalman"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.KalmanForecaster"
+}

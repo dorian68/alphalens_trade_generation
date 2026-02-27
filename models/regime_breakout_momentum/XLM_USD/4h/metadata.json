@@ -1,0 +1,15 @@
+{
+  "symbol": "XLM/USD",
+  "timeframe": "4h",
+  "model_type": "regime_breakout_momentum",
+  "saved_at": "2026-02-24T13:11:51.770815Z",
+  "metadata": {
+    "n_observations": 5355,
+    "trained_at": "2026-02-24T13:11:51.766816Z",
+    "regime": "BREAKOUT_VOL_EXPANSION",
+    "choice": "momentum"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.MomentumForecaster"
+}

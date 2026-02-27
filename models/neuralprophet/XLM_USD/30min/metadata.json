@@ -1,0 +1,14 @@
+{
+  "symbol": "XLM/USD",
+  "timeframe": "30min",
+  "model_type": "neuralprophet",
+  "saved_at": "2026-02-23T04:21:32.645776Z",
+  "metadata": {
+    "n_observations": 7836,
+    "trained_at": "2026-02-23T04:21:32.618725Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "native",
+  "model_file": "model.np",
+  "class_path": "alphalens_forecast.models.neuralprophet_model.NeuralProphetForecaster"
+}

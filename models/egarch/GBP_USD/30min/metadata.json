@@ -1,0 +1,14 @@
+{
+  "symbol": "GBP/USD",
+  "timeframe": "30min",
+  "model_type": "egarch",
+  "saved_at": "2026-02-27T02:55:02.040294Z",
+  "metadata": {
+    "n_observations": 9868,
+    "trained_at": "2026-02-27T02:55:02.030295Z",
+    "training_frequency": "daily"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.garch_model.EGARCHVolModel"
+}

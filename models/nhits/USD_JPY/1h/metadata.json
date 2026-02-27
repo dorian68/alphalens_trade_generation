@@ -1,0 +1,14 @@
+{
+  "symbol": "USD/JPY",
+  "timeframe": "1h",
+  "model_type": "nhits",
+  "saved_at": "2025-12-21T23:15:23.781590Z",
+  "metadata": {
+    "n_observations": 7131,
+    "trained_at": "2025-12-21T23:15:23.751592Z",
+    "training_frequency": "every 2 days"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.nhits_model.NHiTSForecaster"
+}

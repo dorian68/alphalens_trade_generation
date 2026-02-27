@@ -1,0 +1,15 @@
+{
+  "symbol": "EUR/USD",
+  "timeframe": "4h",
+  "model_type": "regime_stress_kalman",
+  "saved_at": "2026-02-26T12:55:46.782511Z",
+  "metadata": {
+    "n_observations": 7310,
+    "trained_at": "2026-02-26T12:55:46.757796Z",
+    "regime": "STRESS_CHOP",
+    "choice": "kalman"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.KalmanForecaster"
+}

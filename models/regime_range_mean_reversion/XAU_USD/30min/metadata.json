@@ -1,0 +1,15 @@
+{
+  "symbol": "XAU/USD",
+  "timeframe": "30min",
+  "model_type": "regime_range_mean_reversion",
+  "saved_at": "2026-02-24T13:11:26.935088Z",
+  "metadata": {
+    "n_observations": 9005,
+    "trained_at": "2026-02-24T13:11:26.930090Z",
+    "regime": "RANGE",
+    "choice": "mean_reversion"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.MeanReversionForecaster"
+}

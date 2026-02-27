@@ -1,0 +1,15 @@
+{
+  "symbol": "ETH/USD",
+  "timeframe": "1h",
+  "model_type": "regime_range_arima",
+  "saved_at": "2026-02-27T03:59:33.681710Z",
+  "metadata": {
+    "n_observations": 6412,
+    "trained_at": "2026-02-27T03:59:33.658780Z",
+    "regime": "RANGE",
+    "choice": "arima"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.ARIMAForecaster"
+}

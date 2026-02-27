@@ -1,0 +1,14 @@
+{
+  "symbol": "AUD/USD",
+  "timeframe": "4h",
+  "model_type": "prophet",
+  "saved_at": "2026-02-27T03:13:37.662046Z",
+  "metadata": {
+    "n_observations": 6932,
+    "trained_at": "2026-02-27T03:13:37.656039Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.prophet_model.ProphetForecaster"
+}

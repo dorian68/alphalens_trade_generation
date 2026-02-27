@@ -1,0 +1,15 @@
+{
+  "symbol": "GBP/USD",
+  "timeframe": "1h",
+  "model_type": "regime_breakout_momentum",
+  "saved_at": "2026-02-24T13:10:24.742550Z",
+  "metadata": {
+    "n_observations": 8568,
+    "trained_at": "2026-02-24T13:10:24.736543Z",
+    "regime": "BREAKOUT_VOL_EXPANSION",
+    "choice": "momentum"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.MomentumForecaster"
+}

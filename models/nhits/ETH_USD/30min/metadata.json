@@ -1,0 +1,14 @@
+{
+  "symbol": "ETH/USD",
+  "timeframe": "30min",
+  "model_type": "nhits",
+  "saved_at": "2026-02-27T03:55:53.093337Z",
+  "metadata": {
+    "n_observations": 7829,
+    "trained_at": "2026-02-27T03:55:52.944632Z",
+    "training_frequency": "every 2 days"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.nhits_model.NHiTSForecaster"
+}

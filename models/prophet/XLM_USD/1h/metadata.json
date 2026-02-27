@@ -1,0 +1,14 @@
+{
+  "symbol": "XLM/USD",
+  "timeframe": "1h",
+  "model_type": "prophet",
+  "saved_at": "2026-02-23T04:22:13.106478Z",
+  "metadata": {
+    "n_observations": 6468,
+    "trained_at": "2026-02-23T04:22:13.088777Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.prophet_model.ProphetForecaster"
+}

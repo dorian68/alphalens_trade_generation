@@ -1,0 +1,14 @@
+{
+  "symbol": "BTC/USD",
+  "timeframe": "4h",
+  "model_type": "prophet",
+  "saved_at": "2026-02-27T03:27:50.964065Z",
+  "metadata": {
+    "n_observations": 5362,
+    "trained_at": "2026-02-27T03:27:50.957065Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.prophet_model.ProphetForecaster"
+}

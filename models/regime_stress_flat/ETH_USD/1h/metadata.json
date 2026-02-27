@@ -1,0 +1,15 @@
+{
+  "symbol": "ETH/USD",
+  "timeframe": "1h",
+  "model_type": "regime_stress_flat",
+  "saved_at": "2026-02-24T13:11:15.198549Z",
+  "metadata": {
+    "n_observations": 6412,
+    "trained_at": "2026-02-24T13:11:15.185096Z",
+    "regime": "STRESS_CHOP",
+    "choice": "flat"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.FlatForecaster"
+}

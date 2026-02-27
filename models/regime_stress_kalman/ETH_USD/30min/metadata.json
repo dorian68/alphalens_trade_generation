@@ -1,0 +1,15 @@
+{
+  "symbol": "ETH/USD",
+  "timeframe": "30min",
+  "model_type": "regime_stress_kalman",
+  "saved_at": "2026-02-27T03:57:50.117238Z",
+  "metadata": {
+    "n_observations": 7829,
+    "trained_at": "2026-02-27T03:57:50.090111Z",
+    "regime": "STRESS_CHOP",
+    "choice": "kalman"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.KalmanForecaster"
+}

@@ -1,0 +1,14 @@
+{
+  "symbol": "XLM/USD",
+  "timeframe": "4h",
+  "model_type": "nhits",
+  "saved_at": "2026-02-26T20:05:13.253998Z",
+  "metadata": {
+    "n_observations": 5355,
+    "trained_at": "2026-02-26T20:05:13.074624Z",
+    "training_frequency": "every 2 days"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.nhits_model.NHiTSForecaster"
+}

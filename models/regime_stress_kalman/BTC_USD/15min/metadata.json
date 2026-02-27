@@ -1,0 +1,15 @@
+{
+  "symbol": "BTC/USD",
+  "timeframe": "15min",
+  "model_type": "regime_stress_kalman",
+  "saved_at": "2026-02-26T14:36:24.103848Z",
+  "metadata": {
+    "n_observations": 167127,
+    "trained_at": "2026-02-26T14:36:22.757487Z",
+    "regime": "STRESS_CHOP",
+    "choice": "kalman"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.KalmanForecaster"
+}

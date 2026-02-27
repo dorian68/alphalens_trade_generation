@@ -1,0 +1,15 @@
+{
+  "symbol": "BTC/USD",
+  "timeframe": "30min",
+  "model_type": "regime_breakout_ets",
+  "saved_at": "2026-02-26T14:43:12.706196Z",
+  "metadata": {
+    "n_observations": 7895,
+    "trained_at": "2026-02-26T14:43:12.694190Z",
+    "regime": "BREAKOUT_VOL_EXPANSION",
+    "choice": "ets"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.ETSForecaster"
+}

@@ -1,0 +1,14 @@
+{
+  "symbol": "AUD/USD",
+  "timeframe": "30min,1h",
+  "model_type": "nhits",
+  "saved_at": "2026-01-05T20:26:20.339771Z",
+  "metadata": {
+    "n_observations": 162781,
+    "trained_at": "2026-01-05T20:26:20.272439Z",
+    "training_frequency": "every 2 days"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.nhits_model.NHiTSForecaster"
+}

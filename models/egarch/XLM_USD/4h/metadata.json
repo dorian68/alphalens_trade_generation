@@ -1,0 +1,14 @@
+{
+  "symbol": "XLM/USD",
+  "timeframe": "4h",
+  "model_type": "egarch",
+  "saved_at": "2026-02-23T04:22:53.160356Z",
+  "metadata": {
+    "n_observations": 5355,
+    "trained_at": "2026-02-23T04:22:53.148351Z",
+    "training_frequency": "daily"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.garch_model.EGARCHVolModel"
+}

@@ -1,0 +1,14 @@
+{
+  "symbol": "USD/CAD",
+  "timeframe": "1h",
+  "model_type": "nhits",
+  "saved_at": "2025-12-21T23:29:20.743354Z",
+  "metadata": {
+    "n_observations": 7057,
+    "trained_at": "2025-12-21T23:29:20.688061Z",
+    "training_frequency": "every 2 days"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.nhits_model.NHiTSForecaster"
+}

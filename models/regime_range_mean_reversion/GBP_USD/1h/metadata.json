@@ -1,0 +1,15 @@
+{
+  "symbol": "GBP/USD",
+  "timeframe": "1h",
+  "model_type": "regime_range_mean_reversion",
+  "saved_at": "2026-02-24T13:10:23.630447Z",
+  "metadata": {
+    "n_observations": 8568,
+    "trained_at": "2026-02-24T13:10:23.627447Z",
+    "regime": "RANGE",
+    "choice": "mean_reversion"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.MeanReversionForecaster"
+}

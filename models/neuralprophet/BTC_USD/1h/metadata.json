@@ -1,0 +1,14 @@
+{
+  "symbol": "BTC/USD",
+  "timeframe": "1h",
+  "model_type": "neuralprophet",
+  "saved_at": "2026-02-27T03:26:37.446946Z",
+  "metadata": {
+    "n_observations": 6605,
+    "trained_at": "2026-02-27T03:26:37.423004Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "native",
+  "model_file": "model.np",
+  "class_path": "alphalens_forecast.models.neuralprophet_model.NeuralProphetForecaster"
+}

@@ -1,0 +1,14 @@
+{
+  "symbol": "USD/JPY",
+  "timeframe": "15min",
+  "model_type": "neuralprophet",
+  "saved_at": "2025-12-21T23:11:40.328334Z",
+  "metadata": {
+    "n_observations": 206460,
+    "trained_at": "2025-12-21T23:11:40.170777Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "native",
+  "model_file": "model.np",
+  "class_path": "alphalens_forecast.models.neuralprophet_model.NeuralProphetForecaster"
+}

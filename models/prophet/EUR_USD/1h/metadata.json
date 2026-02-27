@@ -1,0 +1,14 @@
+{
+  "symbol": "EUR/USD",
+  "timeframe": "1h",
+  "model_type": "prophet",
+  "saved_at": "2026-02-27T02:40:16.454566Z",
+  "metadata": {
+    "n_observations": 8689,
+    "trained_at": "2026-02-27T02:40:16.450567Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.prophet_model.ProphetForecaster"
+}

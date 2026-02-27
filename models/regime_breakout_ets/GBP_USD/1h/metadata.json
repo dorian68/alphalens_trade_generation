@@ -1,0 +1,15 @@
+{
+  "symbol": "GBP/USD",
+  "timeframe": "1h",
+  "model_type": "regime_breakout_ets",
+  "saved_at": "2026-02-26T13:27:09.603588Z",
+  "metadata": {
+    "n_observations": 8568,
+    "trained_at": "2026-02-26T13:27:09.598580Z",
+    "regime": "BREAKOUT_VOL_EXPANSION",
+    "choice": "ets"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.ETSForecaster"
+}

@@ -1,0 +1,14 @@
+{
+  "symbol": "EUR/USD",
+  "timeframe": "30min",
+  "model_type": "neuralprophet",
+  "saved_at": "2026-02-27T02:38:54.967005Z",
+  "metadata": {
+    "n_observations": 9903,
+    "trained_at": "2026-02-27T02:38:54.958005Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "native",
+  "model_file": "model.np",
+  "class_path": "alphalens_forecast.models.neuralprophet_model.NeuralProphetForecaster"
+}

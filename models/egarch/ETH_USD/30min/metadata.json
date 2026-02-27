@@ -1,0 +1,14 @@
+{
+  "symbol": "ETH/USD",
+  "timeframe": "30min",
+  "model_type": "egarch",
+  "saved_at": "2026-02-27T03:57:03.525158Z",
+  "metadata": {
+    "n_observations": 7829,
+    "trained_at": "2026-02-27T03:57:03.516650Z",
+    "training_frequency": "daily"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.garch_model.EGARCHVolModel"
+}

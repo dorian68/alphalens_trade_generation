@@ -1,0 +1,14 @@
+{
+  "symbol": "AUD/USD",
+  "timeframe": "15min",
+  "model_type": "egarch",
+  "saved_at": "2026-02-27T03:09:17.819986Z",
+  "metadata": {
+    "n_observations": 206765,
+    "trained_at": "2026-02-27T03:09:17.683331Z",
+    "training_frequency": "daily"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.garch_model.EGARCHVolModel"
+}

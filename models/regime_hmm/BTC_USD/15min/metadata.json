@@ -1,0 +1,11 @@
+{
+  "symbol": "BTC/USD",
+  "timeframe": "15min",
+  "model_type": "regime_hmm",
+  "saved_at": "2026-02-24T04:45:57.909414Z",
+  "metadata": {
+    "train_start": "2025-01-02 00:00:00+00:00",
+    "train_end": "2025-11-30 00:00:00+00:00"
+  },
+  "model_file": "model.pkl"
+}

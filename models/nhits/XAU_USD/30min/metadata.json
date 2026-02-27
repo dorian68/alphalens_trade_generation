@@ -1,0 +1,14 @@
+{
+  "symbol": "XAU/USD",
+  "timeframe": "30min",
+  "model_type": "nhits",
+  "saved_at": "2026-02-27T02:09:07.802979Z",
+  "metadata": {
+    "n_observations": 9005,
+    "trained_at": "2026-02-27T02:09:07.661371Z",
+    "training_frequency": "every 2 days"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.nhits_model.NHiTSForecaster"
+}

@@ -1,0 +1,14 @@
+{
+  "symbol": "GBP/USD",
+  "timeframe": "4h",
+  "model_type": "nhits",
+  "saved_at": "2026-02-27T02:56:25.836592Z",
+  "metadata": {
+    "n_observations": 7318,
+    "trained_at": "2026-02-27T02:56:25.704323Z",
+    "training_frequency": "every 2 days"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.nhits_model.NHiTSForecaster"
+}

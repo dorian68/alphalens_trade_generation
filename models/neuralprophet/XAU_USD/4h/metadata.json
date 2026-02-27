@@ -1,0 +1,14 @@
+{
+  "symbol": "XAU/USD",
+  "timeframe": "4h",
+  "model_type": "neuralprophet",
+  "saved_at": "2026-02-23T04:12:04.516137Z",
+  "metadata": {
+    "n_observations": 7107,
+    "trained_at": "2026-02-23T04:12:04.502137Z",
+    "training_frequency": "weekly"
+  },
+  "storage_format": "native",
+  "model_file": "model.np",
+  "class_path": "alphalens_forecast.models.neuralprophet_model.NeuralProphetForecaster"
+}

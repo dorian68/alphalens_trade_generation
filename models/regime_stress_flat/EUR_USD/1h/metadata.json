@@ -1,0 +1,15 @@
+{
+  "symbol": "EUR/USD",
+  "timeframe": "1h",
+  "model_type": "regime_stress_flat",
+  "saved_at": "2026-02-24T13:10:09.052311Z",
+  "metadata": {
+    "n_observations": 8689,
+    "trained_at": "2026-02-24T13:10:09.047443Z",
+    "regime": "STRESS_CHOP",
+    "choice": "flat"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.FlatForecaster"
+}

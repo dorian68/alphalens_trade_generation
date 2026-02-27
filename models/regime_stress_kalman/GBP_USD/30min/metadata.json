@@ -1,0 +1,15 @@
+{
+  "symbol": "GBP/USD",
+  "timeframe": "30min",
+  "model_type": "regime_stress_kalman",
+  "saved_at": "2026-02-26T13:25:09.128204Z",
+  "metadata": {
+    "n_observations": 9868,
+    "trained_at": "2026-02-26T13:25:09.076596Z",
+    "regime": "STRESS_CHOP",
+    "choice": "kalman"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.KalmanForecaster"
+}

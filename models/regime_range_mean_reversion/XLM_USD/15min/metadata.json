@@ -1,0 +1,15 @@
+{
+  "symbol": "XLM/USD",
+  "timeframe": "15min",
+  "model_type": "regime_range_mean_reversion",
+  "saved_at": "2026-02-24T13:11:38.606821Z",
+  "metadata": {
+    "n_observations": 210670,
+    "trained_at": "2026-02-24T13:11:38.602921Z",
+    "regime": "RANGE",
+    "choice": "mean_reversion"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.regime_baselines.MeanReversionForecaster"
+}

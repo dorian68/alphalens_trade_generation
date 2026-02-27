@@ -1,0 +1,14 @@
+{
+  "symbol": "BTC/USD",
+  "timeframe": "n",
+  "model_type": "egarch",
+  "saved_at": "2025-12-21T23:53:44.526872Z",
+  "metadata": {
+    "n_observations": 5434,
+    "trained_at": "2025-12-21T23:53:44.518873Z",
+    "training_frequency": "daily"
+  },
+  "storage_format": "state_dict",
+  "model_file": "model.pth",
+  "class_path": "alphalens_forecast.models.garch_model.EGARCHVolModel"
+}
