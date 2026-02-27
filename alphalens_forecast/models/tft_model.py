@@ -24,17 +24,32 @@ class TFTForecaster(BaseForecaster):
         device: str = "cpu",
     ) -> None:
         super().__init__(name="TFT", device=device)
-        self._batch_size = 64
+        self._input_chunk_length = input_chunk_length
+        self._output_chunk_length = output_chunk_length
+        self._batch_size = 256
+        self._val_fraction = 0.1
+        self._min_val = 200
         pl_trainer_kwargs = None
+        callbacks = []
+        try:
+            from pytorch_lightning.callbacks import EarlyStopping
+
+            callbacks.append(EarlyStopping(monitor="val_loss", patience=10, mode="min"))
+        except Exception:
+            callbacks = []
         if self.device.lower().startswith("cuda"):
             # Centralized device handling: let Lightning manage GPU placement.
             pl_trainer_kwargs = {"accelerator": "gpu", "devices": 1}
         kwargs = {}
+        if callbacks:
+            pl_trainer_kwargs = dict(pl_trainer_kwargs or {})
+            pl_trainer_kwargs["callbacks"] = callbacks
+        self._pl_trainer_kwargs = pl_trainer_kwargs
         if pl_trainer_kwargs is not None:
             kwargs["pl_trainer_kwargs"] = pl_trainer_kwargs
         self._model = TFTModel(
-            input_chunk_length=input_chunk_length,
-            output_chunk_length=output_chunk_length,
+            input_chunk_length=self._input_chunk_length,
+            output_chunk_length=self._output_chunk_length,
             random_state=42,
             hidden_size=32,
             lstm_layers=1,
@@ -81,33 +96,65 @@ class TFTForecaster(BaseForecaster):
         regressors: Optional[pd.DataFrame] = None,
     ) -> None:
         series = TimeSeries.from_series(target)
+        batch_size = self._resolve_batch_size(len(series))
+        if batch_size != self._batch_size or self._model is None:
+            self._batch_size = batch_size
+            self._model = TFTModel(
+                input_chunk_length=self._input_chunk_length,
+                output_chunk_length=self._output_chunk_length,
+                random_state=42,
+                hidden_size=32,
+                lstm_layers=1,
+                dropout=0.1,
+                batch_size=self._batch_size,
+                n_epochs=200,
+                pl_trainer_kwargs=self._pl_trainer_kwargs,
+            )
         covariates = (
             TimeSeries.from_dataframe(regressors, value_cols=list(regressors.columns))
             if regressors is not None
             else None
         )
+        train_series, val_series = self._split_series(series)
         dataloader_kwargs = self._dataloader_kwargs()
         if dataloader_kwargs:
             try:
                 self._model.fit(
-                    series,
+                    train_series,
                     past_covariates=covariates,
                     future_covariates=covariates,
+                    val_series=val_series,
                     dataloader_kwargs=dataloader_kwargs,
                 )
             except TypeError:
                 logger.warning("TFT dataloader_kwargs unsupported; falling back to defaults.")
+                try:
+                    self._model.fit(
+                        train_series,
+                        past_covariates=covariates,
+                        future_covariates=covariates,
+                        val_series=val_series,
+                    )
+                except TypeError:
+                    self._model.fit(
+                        train_series,
+                        past_covariates=covariates,
+                        future_covariates=covariates,
+                    )
+        else:
+            try:
                 self._model.fit(
-                    series,
+                    train_series,
+                    past_covariates=covariates,
+                    future_covariates=covariates,
+                    val_series=val_series,
+                )
+            except TypeError:
+                self._model.fit(
+                    train_series,
                     past_covariates=covariates,
                     future_covariates=covariates,
                 )
-        else:
-            self._model.fit(
-                series,
-                past_covariates=covariates,
-                future_covariates=covariates,
-            )
         self._series = series
         self._past_covariates = covariates
         self._future_covariates = covariates
@@ -146,3 +193,18 @@ class TFTForecaster(BaseForecaster):
         result.columns = ["yhat"]
         result = result.reset_index().rename(columns={"index": "ds"})
         return result
+
+    def _resolve_batch_size(self, n_obs: int) -> int:
+        if n_obs <= 0:
+            return int(self._batch_size)
+        return int(max(32, min(self._batch_size, n_obs // 5)))
+
+    def _split_series(self, series: TimeSeries) -> tuple[TimeSeries, Optional[TimeSeries]]:
+        if len(series) < self._min_val:
+            return series, None
+        val_size = max(1, int(len(series) * self._val_fraction))
+        if val_size < 1 or val_size >= len(series):
+            return series, None
+        train = series[:-val_size]
+        val = series[-val_size:]
+        return train, val

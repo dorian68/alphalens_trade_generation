@@ -52,7 +52,16 @@ def select_model_type(timeframe: str) -> str:
 
 def resolve_device(device: Optional[str], model_type: str) -> str:
     """Resolve the requested device for Torch-backed models, falling back safely."""
-    resolved = (device or "cpu").strip()
+    resolved = (device or "auto").strip()
+    if resolved.lower() == "auto":
+        if model_type not in _TORCH_BACKED:
+            return "cpu"
+        try:
+            import torch
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Auto device requested but torch import failed; falling back to CPU. (%s)", exc)
+            return "cpu"
+        return "cuda" if torch.cuda.is_available() else "cpu"
     if model_type not in _TORCH_BACKED:
         return resolved
     if resolved.lower().startswith("cuda"):

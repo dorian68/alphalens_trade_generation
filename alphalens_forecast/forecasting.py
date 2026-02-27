@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -35,12 +35,39 @@ from alphalens_forecast.models import (
     ModelRouter,
     NHiTSForecaster,
 )
+from alphalens_forecast.models.regime_baselines import (
+    ARIMAForecaster,
+    ARIMAParams,
+    ETSForecaster,
+    ETSParams,
+    FlatForecaster,
+    KalmanForecaster,
+    KalmanParams,
+    MeanReversionForecaster,
+    MeanReversionParams,
+    MomentumForecaster,
+    MomentumParams,
+    OUForecaster,
+    OUParams,
+)
 from alphalens_forecast.backtesting import TrajectoryRecorder
 from alphalens_forecast.models.selection import resolve_device, select_model_type
 from alphalens_forecast.training import MEAN_TRAINERS, train_egarch
 from alphalens_forecast.utils.model_store import ModelStore, StoredArtifacts
 from alphalens_forecast.utils.text import slugify
 from alphalens_forecast.utils.timeseries import align_series_to_timeframe, series_to_price_frame
+from alphalens_forecast.regime_detection.deterministic import (
+    DeterministicRegimeDetector,
+    RegimeConfig,
+    REGIME_BREAKOUT,
+    REGIME_RANGE,
+    REGIME_STRESS_CHOP,
+    REGIME_TREND_DOWN,
+    REGIME_TREND_UP,
+)
+from alphalens_forecast.trading.overlays.context_insights_overlay import ContextInsightsOverlay
+from alphalens_forecast.trading.overlays.performance_overlay import PerformanceOverlay
+from alphalens_forecast.trading.overlays.regime_risk_overlay import RegimeRiskOverlay
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +77,13 @@ FREQ_MAP: Dict[str, str] = {
     "15min": "15min",
     "30min": "30min",
     "45min": "45min",
-    "1h": "1H",
-    "2h": "2H",
-    "3h": "3H",
-    "4h": "4H",
-    "6h": "6H",
-    "8h": "8H",
-    "12h": "12H",
+    "1h": "1h",
+    "2h": "2h",
+    "3h": "3h",
+    "4h": "4h",
+    "6h": "6h",
+    "8h": "8h",
+    "12h": "12h",
     "1day": "1D",
 }
 
@@ -111,6 +138,93 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def _regime_blend_weight(
+    regime_label: Optional[str],
+    regime_confidence: Optional[float],
+    config: AppConfig,
+    *,
+    horizon_steps: Optional[int] = None,
+    max_steps: Optional[int] = None,
+) -> Optional[float]:
+    if not getattr(config, "regime_blend_enabled", False):
+        return None
+    if regime_label is None:
+        return None
+    label = str(regime_label)
+    if label == REGIME_RANGE:
+        base = config.regime_blend_range
+    elif label == REGIME_BREAKOUT:
+        base = config.regime_blend_breakout
+    else:
+        base = config.regime_blend_trend
+    base = _clamp(float(base), 0.0, 1.0)
+    horizon_alpha = _clamp(float(getattr(config, "regime_blend_horizon_alpha", 0.0) or 0.0), 0.0, 1.0)
+    if horizon_alpha > 0 and horizon_steps is not None and max_steps is not None and max_steps > 0:
+        frac = _clamp(float(horizon_steps) / float(max_steps), 0.0, 1.0)
+        if label in {REGIME_RANGE, REGIME_STRESS_CHOP}:
+            base = base + frac * horizon_alpha * (1.0 - base)
+        else:
+            base = base * (1.0 - frac * horizon_alpha)
+        base = _clamp(float(base), 0.0, 1.0)
+    conf_value = 0.5
+    if regime_confidence is not None and np.isfinite(regime_confidence):
+        conf_value = float(_clamp(float(regime_confidence), 0.0, 1.0))
+    alpha = _clamp(float(getattr(config, "regime_blend_confidence_alpha", 0.5)), 0.0, 1.0)
+    weight_last = base + (1.0 - conf_value) * alpha * (1.0 - base)
+    return float(_clamp(weight_last, 0.0, 1.0))
+
+
+def _compute_bias_corrections(
+    *,
+    mean_model: BaseForecaster,
+    target_series: pd.Series,
+    timeframe: str,
+    horizons: Sequence[Tuple[int, int]],
+    window: int,
+    min_history: int,
+) -> Dict[str, float]:
+    if window <= 0:
+        return {}
+    if len(target_series) < window + max(1, min_history):
+        return {}
+    train_series = target_series.iloc[:-window]
+    test_series = target_series.iloc[-window:]
+    if train_series.empty or test_series.empty:
+        return {}
+    try:
+        from alphalens_forecast.evaluation import rolling_forecast  # type: ignore
+    except Exception:
+        return {}
+    bias_map: Dict[str, float] = {}
+    for horizon_hours, steps in horizons:
+        try:
+            preds = rolling_forecast(
+                mean_model,
+                train_series,
+                test_series,
+                timeframe,
+                horizon=steps,
+                max_steps=window,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Bias correction rolling forecast failed for %sh: %s", horizon_hours, exc)
+            continue
+        if preds is None or len(preds) == 0:
+            continue
+        idx = test_series.sort_index().index[: len(preds)]
+        actual = pd.to_numeric(test_series.loc[idx], errors="coerce").to_numpy(dtype=float)
+        residuals = np.asarray(preds, dtype=float) - actual
+        residuals = residuals[np.isfinite(residuals)]
+        if residuals.size == 0:
+            continue
+        bias_map[f"{horizon_hours}h"] = float(np.mean(residuals))
+    return bias_map
+
+
 def summarize_mean_model(model: BaseForecaster) -> Dict[str, Any]:
     """Extract metadata describing the fitted mean model."""
     summary: Dict[str, Any] = {
@@ -141,6 +255,208 @@ def _load_provider_frame(
         except TypeError:
             logger.debug("DataProvider.load_data lacks refresh support; loading without refresh.")
     return provider.load_data(symbol, timeframe)
+
+
+def _is_trending_regime(label: str) -> bool:
+    return label in {REGIME_TREND_UP, REGIME_TREND_DOWN}
+
+
+_REGIME_MODEL_PREFIX = {
+    REGIME_RANGE: "range",
+    REGIME_BREAKOUT: "breakout",
+    REGIME_STRESS_CHOP: "stress",
+}
+_REGIME_GLOBAL_SYMBOL = "global"
+_REGIME_GLOBAL_TIMEFRAME = "global"
+
+
+def _normalize_model_choice(raw_value: Optional[str], default: str) -> str:
+    if raw_value is None:
+        return default
+    value = str(raw_value).strip().lower()
+    return value or default
+
+
+def _regime_model_type(regime_label: str, model_choice: str) -> str:
+    prefix = _REGIME_MODEL_PREFIX.get(regime_label, "regime")
+    safe_choice = "".join(ch for ch in model_choice.lower() if ch.isalnum() or ch in {"_", "-"}).strip("-_")
+    return f"regime_{prefix}_{safe_choice}"
+
+
+def _tag_regime_model(model: BaseForecaster, choice: str) -> BaseForecaster:
+    setattr(model, "_regime_choice", choice)
+    return model
+
+
+def _maybe_load_cached_baseline(
+    *,
+    config: AppConfig,
+    model_router: Optional[ModelRouter],
+    symbol: Optional[str],
+    timeframe: Optional[str],
+    regime_label: str,
+    model_choice: str,
+) -> Optional[BaseForecaster]:
+    if not getattr(config, "regime_baseline_cache", False):
+        return None
+    if model_router is None:
+        return None
+    model_type = _regime_model_type(regime_label, model_choice)
+    candidates = _regime_cache_candidates(symbol, timeframe, config)
+    for cand_symbol, cand_timeframe in candidates:
+        try:
+            if hasattr(model_router, "has_model") and not model_router.has_model(
+                model_type,
+                cand_symbol,
+                cand_timeframe,
+            ):
+                continue
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to check cached regime baseline %s for %s @ %s: %s",
+                model_type,
+                cand_symbol,
+                cand_timeframe,
+                exc,
+            )
+            continue
+        try:
+            model = model_router.load_model(model_type, cand_symbol, cand_timeframe)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to load cached regime baseline %s for %s @ %s: %s",
+                model_type,
+                cand_symbol,
+                cand_timeframe,
+                exc,
+            )
+            continue
+        if model is None:
+            continue
+        if not isinstance(model, BaseForecaster):
+            logger.warning(
+                "Cached regime baseline %s for %s @ %s is not a BaseForecaster; ignoring.",
+                model_type,
+                cand_symbol,
+                cand_timeframe,
+            )
+            continue
+        setattr(model, "_prefit", True)
+        setattr(model, "_regime_choice", model_choice)
+        return model
+    return None
+
+
+def _regime_cache_candidates(
+    symbol: Optional[str],
+    timeframe: Optional[str],
+    config: AppConfig,
+) -> Sequence[Tuple[str, str]]:
+    if not getattr(config, "regime_per_instrument_models", False):
+        if symbol is None or timeframe is None:
+            return ()
+        return ((symbol, timeframe),)
+    candidates: list[tuple[str, str]] = []
+    if symbol is not None and timeframe is not None:
+        candidates.append((symbol, timeframe))
+    if timeframe is not None:
+        candidates.append((_REGIME_GLOBAL_SYMBOL, timeframe))
+    candidates.append((_REGIME_GLOBAL_SYMBOL, _REGIME_GLOBAL_TIMEFRAME))
+    seen: set[tuple[str, str]] = set()
+    ordered: list[tuple[str, str]] = []
+    for entry in candidates:
+        if entry in seen:
+            continue
+        seen.add(entry)
+        ordered.append(entry)
+    return tuple(ordered)
+
+
+def _select_regime_baseline(
+    regime_label: str,
+    *,
+    config: AppConfig,
+    model_router: Optional[ModelRouter] = None,
+    symbol: Optional[str] = None,
+    timeframe: Optional[str] = None,
+) -> Optional[BaseForecaster]:
+    if regime_label == REGIME_RANGE:
+        choice = _normalize_model_choice(getattr(config, "regime_range_model", None), "mean_reversion")
+        cached = _maybe_load_cached_baseline(
+            config=config,
+            model_router=model_router,
+            symbol=symbol,
+            timeframe=timeframe,
+            regime_label=regime_label,
+            model_choice=choice,
+        )
+        if cached is not None:
+            return cached
+        if choice in {"mean_reversion", "meanreversion", "mr"}:
+            return _tag_regime_model(
+                MeanReversionForecaster(params=MeanReversionParams(window=60, half_life=12.0)),
+                choice,
+            )
+        if choice == "arima":
+            return _tag_regime_model(ARIMAForecaster(params=ARIMAParams()), choice)
+        if choice == "ets":
+            return _tag_regime_model(ETSForecaster(params=ETSParams()), choice)
+        if choice == "ou":
+            return _tag_regime_model(OUForecaster(params=OUParams()), choice)
+        logger.warning("Unknown RANGE model choice '%s'; using default baseline.", choice)
+        return _tag_regime_model(
+            MeanReversionForecaster(params=MeanReversionParams(window=60, half_life=12.0)),
+            "mean_reversion",
+        )
+    if regime_label == REGIME_BREAKOUT:
+        choice = _normalize_model_choice(getattr(config, "regime_breakout_model", None), "momentum")
+        cached = _maybe_load_cached_baseline(
+            config=config,
+            model_router=model_router,
+            symbol=symbol,
+            timeframe=timeframe,
+            regime_label=regime_label,
+            model_choice=choice,
+        )
+        if cached is not None:
+            return cached
+        if choice == "momentum":
+            return _tag_regime_model(
+                MomentumForecaster(params=MomentumParams(window=25, max_abs_drift=0.03)),
+                choice,
+            )
+        if choice == "arima":
+            return _tag_regime_model(ARIMAForecaster(params=ARIMAParams()), choice)
+        if choice == "ets":
+            return _tag_regime_model(ETSForecaster(params=ETSParams()), choice)
+        if choice == "ou":
+            return _tag_regime_model(OUForecaster(params=OUParams()), choice)
+        logger.warning("Unknown BREAKOUT model choice '%s'; using default baseline.", choice)
+        return _tag_regime_model(
+            MomentumForecaster(params=MomentumParams(window=25, max_abs_drift=0.03)),
+            "momentum",
+        )
+    if regime_label == REGIME_STRESS_CHOP:
+        choice = _normalize_model_choice(getattr(config, "regime_stress_model", None), "flat")
+        cached = _maybe_load_cached_baseline(
+            config=config,
+            model_router=model_router,
+            symbol=symbol,
+            timeframe=timeframe,
+            regime_label=regime_label,
+            model_choice=choice,
+        )
+        if cached is not None:
+            return cached
+        if choice == "flat":
+            return _tag_regime_model(FlatForecaster(), choice)
+        if choice == "kalman":
+            return _tag_regime_model(KalmanForecaster(params=KalmanParams()), choice)
+        if choice == "arima":
+            return _tag_regime_model(ARIMAForecaster(params=ARIMAParams()), choice)
+        logger.warning("Unknown STRESS_CHOP model choice '%s'; using default baseline.", choice)
+        return _tag_regime_model(FlatForecaster(), "flat")
+    return None
 
 
 def summarize_garch_model(
@@ -197,15 +513,13 @@ def compute_student_t_quantiles(
     from scipy.stats import t
 
     dist = t(df=dof)
-    q15_log = median_log + dist.ppf(0.15) * sigma
+    q20_log = median_log + dist.ppf(0.20) * sigma
     q50_log = median_log
-    q85_log = median_log + dist.ppf(0.85) * sigma
-    print(f"q15_log: {float(np.exp(q15_log))} and q15 knowing its 2 times sigma: {float(np.exp(median_log + dist.ppf(0.15) * 2 * sigma))} ")
-    print(f"q85_log: {float(np.exp(q85_log))} and q85 knowing its 2 times sigma: {float(np.exp(median_log + dist.ppf(0.85) * 2 * sigma))} ")
+    q80_log = median_log + dist.ppf(0.80) * sigma
     return {
-        "p20": float(np.exp(q15_log)),
+        "p20": float(np.exp(q20_log)),
         "p50": float(np.exp(q50_log)),
-        "p80": float(np.exp(q85_log)),
+        "p80": float(np.exp(q80_log)),
     }
 
 
@@ -282,6 +596,9 @@ class ForecastEngine:
         refresh_data: bool = False,
         execution_price: Optional[float] = None,
         execution_price_source: Optional[str] = None,
+        enable_regime_switching: Optional[bool] = None,
+        regime_lookback: Optional[int] = None,
+        enable_performance_patches: Optional[bool] = None,
     ) -> OrchestrationResult:
         """Run the full pipeline: data -> mean model -> vol -> Monte Carlo."""
         run_start = time.perf_counter()
@@ -326,6 +643,84 @@ class ForecastEngine:
             format_timestamp(price_frame.index[-1]),
         )
 
+        switching_enabled = (
+            self._config.regime_switching if enable_regime_switching is None else enable_regime_switching
+        )
+        performance_patches_enabled = (
+            self._config.performance_patches if enable_performance_patches is None else enable_performance_patches
+        )
+        regime_lookback_value = regime_lookback or self._config.regime_lookback
+        regime_label: Optional[str] = None
+        regime_confidence: Optional[float] = None
+        regime_mode_used: Optional[str] = None
+        regime_scores: Optional[Dict[str, float]] = None
+        regime_is_trend = True
+        if switching_enabled:
+            try:
+                detector = DeterministicRegimeDetector(
+                    RegimeConfig(
+                        lookback=regime_lookback_value,
+                        enable_walk_forward_calib=self._config.regime_walk_forward_calib,
+                        calib_window=self._config.regime_calib_window,
+                        calib_min_history=self._config.regime_calib_min_history,
+                        calib_trend_quantile=self._config.regime_calib_trend_quantile,
+                        calib_range_quantile=self._config.regime_calib_range_quantile,
+                        calib_chop_quantile=self._config.regime_calib_chop_quantile,
+                        calib_vol_expansion_quantile=self._config.regime_calib_vol_expansion_quantile,
+                        enable_score_smoothing=self._config.regime_score_smoothing,
+                        score_smoothing_alpha=self._config.regime_score_smoothing_alpha,
+                        enable_vol_mom_confirm=self._config.regime_vol_mom_confirm,
+                        volume_window=self._config.regime_volume_window,
+                        volume_z_threshold=self._config.regime_volume_z_threshold,
+                        volume_ratio_threshold=self._config.regime_volume_ratio_threshold,
+                        momentum_window=self._config.regime_momentum_window,
+                        momentum_threshold=self._config.regime_momentum_threshold,
+                        regime_mode=self._config.regime_mode,
+                    )
+                )
+                regime_result = detector.detect(price_frame)
+                regime_label = regime_result.regime
+                regime_confidence = regime_result.confidence
+                regime_scores = regime_result.scores or None
+                regime_mode_used = None
+                try:
+                    regime_mode_used = (regime_result.meta or {}).get("mode_used")
+                except Exception:
+                    regime_mode_used = None
+                regime_is_trend = _is_trending_regime(regime_label)
+                logger.info(
+                    "Regime detected: %s (confidence=%.3f) | route=%s",
+                    regime_label,
+                    regime_confidence,
+                    "trend" if regime_is_trend else "alternate",
+                )
+            except Exception as exc:  # noqa: BLE001
+                switching_enabled = False
+                regime_is_trend = True
+                if logger.isEnabledFor(logging.DEBUG):
+                    required = ["open", "high", "low", "close"]
+                    missing = [col for col in required if col not in price_frame.columns]
+                    nan_counts = {}
+                    try:
+                        if not missing:
+                            nan_counts = price_frame[required].isna().sum().to_dict()
+                    except Exception:
+                        nan_counts = {}
+                    logger.debug(
+                        "Regime detection failed for %s [%s] | rows=%d cols=%s missing=%s nan_counts=%s "
+                        "index_range=%s..%s | error=%s",
+                        symbol,
+                        timeframe,
+                        len(price_frame) if price_frame is not None else -1,
+                        list(price_frame.columns) if hasattr(price_frame, "columns") else None,
+                        missing,
+                        nan_counts,
+                        format_timestamp(price_frame.index.min()) if hasattr(price_frame, "index") and len(price_frame) else None,
+                        format_timestamp(price_frame.index.max()) if hasattr(price_frame, "index") and len(price_frame) else None,
+                        exc,
+                    )
+                logger.warning("Regime detection failed; using default pipeline. (%s)", exc)
+
         data_hash = compute_dataframe_hash(price_frame)
         logger.debug("Price frame hash: %s", data_hash)
         if (
@@ -334,6 +729,7 @@ class ForecastEngine:
             and frame_override is None
             and not force_retrain
             and execution_price is None
+            and (not switching_enabled or regime_is_trend)
         ):
             reused = self._reuse_from_store(
                 model_store=model_store,
@@ -346,6 +742,29 @@ class ForecastEngine:
                 run_timestamp_slug=run_timestamp_slug,
             )
             if reused is not None:
+                if switching_enabled:
+                    updated_meta = dict(reused.metadata) if isinstance(reused.metadata, dict) else {}
+                    updated_meta["regime"] = {
+                        "enabled": switching_enabled,
+                        "label": regime_label,
+                        "confidence": regime_confidence,
+                        "lookback": regime_lookback_value,
+                        "route": "trend" if regime_is_trend else "alternate",
+                        "mode_used": regime_mode_used,
+                    }
+                    reused.metadata = updated_meta
+                overlay_context = {
+                    "regime_enabled": switching_enabled,
+                    "regime_label": regime_label,
+                    "regime_confidence": regime_confidence,
+                    "regime_route": "trend" if regime_is_trend else "alternate",
+                    "entry_model_vol_by_horizon": {},
+                    "vol_ref": None,
+                    "performance_patches_enabled": performance_patches_enabled,
+                    "price_frame": price_frame,
+                }
+                reused.payload = RegimeRiskOverlay().apply(reused.payload or {}, overlay_context)
+                reused.payload = PerformanceOverlay().apply(reused.payload or {}, overlay_context)
                 return reused
 
         features = prepare_features(price_frame)
@@ -381,11 +800,70 @@ class ForecastEngine:
         if freq is None:
             raise ValueError(f"No pandas frequency mapping for timeframe '{timeframe}'.")
 
+        regime_fit_seconds: Optional[float] = None
+        if switching_enabled and not regime_is_trend and regime_label is not None:
+            baseline_model = _select_regime_baseline(
+                regime_label,
+                config=self._config,
+                model_router=self._model_router,
+                symbol=symbol,
+                timeframe=timeframe,
+            )
+            if baseline_model is None:
+                logger.warning(
+                    "Regime routing enabled but no baseline available for %s; using default pipeline.",
+                    regime_label,
+                )
+            else:
+                try:
+                    if not getattr(baseline_model, "_prefit", False):
+                        fit_start = time.perf_counter()
+                        baseline_model.fit(target_series)
+                        regime_fit_seconds = time.perf_counter() - fit_start
+                        if getattr(self._config, "regime_baseline_cache", False):
+                            model_choice = getattr(baseline_model, "_regime_choice", "baseline")
+                            model_type = _regime_model_type(regime_label, str(model_choice))
+                            try:
+                                self._model_router.save_model(
+                                    model_type,
+                                    symbol,
+                                    timeframe,
+                                    baseline_model,
+                                    metadata={"regime": regime_label, "choice": model_choice},
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                logger.warning(
+                                    "Failed to cache regime baseline %s for %s @ %s: %s",
+                                    model_type,
+                                    symbol,
+                                    timeframe,
+                                    exc,
+                                )
+                    else:
+                        regime_fit_seconds = 0.0
+                    mean_model_override = baseline_model
+                    logger.info(
+                        "Regime routing enabled: using %s for %s [%s] (regime=%s).",
+                        baseline_model.name,
+                        symbol,
+                        timeframe,
+                        regime_label,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Regime baseline %s failed for %s @ %s; using default pipeline. (%s)",
+                        getattr(baseline_model, "name", "baseline"),
+                        symbol,
+                        timeframe,
+                        exc,
+                    )
+                    baseline_model = None
+
         model_type = select_model_type(timeframe)
-        device = resolve_device(self._config.torch_device, model_type)
+        device = resolve_device(self._config.inference_device, model_type)
         mean_model = mean_model_override
         if mean_model is not None:
-            durations["mean_model_fit_seconds"] = 0.0
+            durations["mean_model_fit_seconds"] = regime_fit_seconds or 0.0
             logger.info(
                 "Using provided mean model (%s) for %s [%s]",
                 getattr(mean_model, "name", mean_model.__class__.__name__),
@@ -548,6 +1026,19 @@ class ForecastEngine:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Rolling evaluation failed; continuing with bulk forecast. (%s)", exc)
         logger.info("Processing %d horizons", len(horizon_iterable))
+        bias_corrections: Dict[str, float] = {}
+        if getattr(self._config, "bias_correction_enabled", False):
+            bias_window = int(getattr(self._config, "bias_correction_window", 0) or 0)
+            bias_min_history = int(getattr(self._config, "bias_correction_min_history", 0) or 0)
+            if bias_window > 0:
+                bias_corrections = _compute_bias_corrections(
+                    mean_model=mean_model,
+                    target_series=target_series,
+                    timeframe=timeframe,
+                    horizons=horizon_iterable,
+                    window=bias_window,
+                    min_history=bias_min_history,
+                )
         forecast_loop_start = time.perf_counter()
         for horizon_hours, steps in tqdm(
             horizon_iterable,
@@ -564,6 +1055,37 @@ class ForecastEngine:
                 forecast_df = forecast_df.set_index("ds")
 
             horizon_label = f"{horizon_hours}h"
+            horizon_variance = variance_path.iloc[:steps].to_numpy(dtype=float)
+            sigma_per_step = sigma_path.iloc[:steps].to_numpy(dtype=float)
+            if not np.isfinite(horizon_variance).all() or not np.isfinite(sigma_per_step).all():
+                logger.error("Invalid EGARCH path detected for horizon %s.", horizon_hours)
+                raise RuntimeError("EGARCH provided invalid variance or sigma values.")
+            sigma_h = float(np.sqrt(np.sum(horizon_variance)))
+            bias_value = bias_corrections.get(horizon_label)
+            if bias_value is not None and np.isfinite(bias_value):
+                sigma_clip = float(getattr(self._config, "bias_correction_sigma_clip", 0.0) or 0.0)
+                if sigma_clip > 0 and np.isfinite(sigma_h) and sigma_h > 0:
+                    bias_value = float(_clamp(float(bias_value), -sigma_clip * sigma_h, sigma_clip * sigma_h))
+                adjusted = forecast_df["yhat"].astype(float) - float(bias_value)
+                if float(adjusted.iloc[-1]) > 0:
+                    forecast_df = forecast_df.copy()
+                    forecast_df["yhat"] = adjusted
+                else:
+                    logger.debug("Skipping bias correction for %s due to non-positive yhat.", horizon_label)
+
+            blend_weight = _regime_blend_weight(
+                regime_label,
+                regime_confidence,
+                self._config,
+                horizon_steps=steps,
+                max_steps=max_steps,
+            )
+            if blend_weight is not None and 0.0 < blend_weight < 1.0:
+                forecast_df = forecast_df.copy()
+                forecast_df["yhat"] = (
+                    blend_weight * last_price + (1.0 - blend_weight) * forecast_df["yhat"].astype(float)
+                )
+
             mean_forecasts[horizon_label] = forecast_df.copy()
             if trajectory_recorder is not None:
                 trajectory_recorder.add_from_dataframe(
@@ -580,13 +1102,6 @@ class ForecastEngine:
                 raise ValueError("Mean model returned a non-positive price forecast.")
             median_log = float(np.log(median_price_estimate))
             drift = (median_log - last_log_price) / steps
-
-            horizon_variance = variance_path.iloc[:steps].to_numpy(dtype=float)
-            sigma_per_step = sigma_path.iloc[:steps].to_numpy(dtype=float)
-            if not np.isfinite(horizon_variance).all() or not np.isfinite(sigma_per_step).all():
-                logger.error("Invalid EGARCH path detected for horizon %s.", horizon_hours)
-                raise RuntimeError("EGARCH provided invalid variance or sigma values.")
-            sigma_h = float(np.sqrt(np.sum(horizon_variance)))
 
             quantiles = compute_student_t_quantiles(
                 median_log=median_log,
@@ -685,6 +1200,35 @@ class ForecastEngine:
             use_montecarlo=use_montecarlo,
             trade_mode=trade_mode_normalized,
         )
+        sigma_by_horizon = {horizon.horizon_label: float(horizon.sigma) for horizon in horizon_payload}
+        vol_ref = None
+        if sigma_by_horizon:
+            sigma_values = [value for value in sigma_by_horizon.values() if np.isfinite(value)]
+            if sigma_values:
+                vol_ref = float(np.median(sigma_values))
+        overlay_context = {
+            "regime_enabled": switching_enabled,
+            "regime_label": regime_label,
+            "regime_confidence": regime_confidence,
+            "regime_scores": regime_scores,
+            "regime_mode_used": regime_mode_used,
+            "regime_route": "trend" if regime_is_trend else "alternate",
+            "entry_model_vol_by_horizon": sigma_by_horizon,
+            "vol_ref": vol_ref,
+            "performance_patches_enabled": performance_patches_enabled,
+            "price_frame": price_frame,
+        }
+        if logger.isEnabledFor(logging.DEBUG) and regime_label is None:
+            logger.debug(
+                "Trade overlay: missing regime_label for %s [%s] | enabled=%s rows=%d",
+                symbol,
+                timeframe,
+                switching_enabled,
+                len(price_frame) if price_frame is not None else -1,
+            )
+        result_payload = RegimeRiskOverlay().apply(result_payload, overlay_context)
+        result_payload = PerformanceOverlay().apply(result_payload, overlay_context)
+        result_payload = ContextInsightsOverlay().apply(result_payload, overlay_context)
         if trajectory_recorder is not None:
             result_payload["trajectories"] = trajectory_recorder.to_payload()
 
@@ -713,10 +1257,18 @@ class ForecastEngine:
             "environment": {
                 "python": platform.python_version(),
                 "numpy": np.__version__,
-            "pandas": pd.__version__,
-            "platform": platform.platform(),
-        },
-    }
+                "pandas": pd.__version__,
+                "platform": platform.platform(),
+            },
+        }
+        metadata["regime"] = {
+            "enabled": switching_enabled,
+            "label": regime_label,
+            "confidence": regime_confidence,
+            "lookback": regime_lookback_value,
+            "route": "trend" if regime_is_trend else "alternate",
+            "mode_used": regime_mode_used,
+        }
         if rolling_summary:
             metadata["rolling_eval"] = rolling_summary
         metadata["residual_std"] = float(residuals.std(ddof=0))

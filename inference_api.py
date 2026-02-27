@@ -246,7 +246,7 @@ def load_models(
     timeframe: str,
     model_type: str,
 ) -> Tuple[Optional[Any], Optional[Any], Dict[str, Any]]:
-    device = resolve_device(config.torch_device, model_type)
+    device = resolve_device(config.inference_device, model_type)
 
     mean_info = inspect_model_assets(router, model_type, symbol, timeframe)
     mean_info["device"] = device
@@ -450,6 +450,27 @@ def handle_forecast(
         "refresh_data",
         warnings,
     )
+    enable_regime_switching = coerce_bool(
+        payload.get("enable_regime_switching"),
+        config.regime_switching,
+        "enable_regime_switching",
+        warnings,
+    )
+    enable_performance_patches = coerce_bool(
+        payload.get("enable_performance_patches"),
+        config.performance_patches,
+        "enable_performance_patches",
+        warnings,
+    )
+    regime_lookback = coerce_int(
+        payload.get("regime_lookback"),
+        config.regime_lookback,
+        "regime_lookback",
+        warnings,
+    )
+    if regime_lookback <= 0:
+        warnings.append("regime_lookback must be > 0; using default.")
+        regime_lookback = config.regime_lookback
 
     model_type_raw = payload.get("model_type")
     if model_type_raw is None:
@@ -494,6 +515,8 @@ def handle_forecast(
         "include_model_info": include_model_info,
         "force_retrain": force_retrain,
         "refresh_data": refresh_data,
+        "enable_regime_switching": enable_regime_switching,
+        "regime_lookback": regime_lookback,
     }
     if live_price_raw is not None:
         request_context["live_price"] = execution_price
@@ -503,7 +526,7 @@ def handle_forecast(
     try:
         model_router = ModelRouter()
         if force_retrain:
-            device = resolve_device(config.torch_device, model_type)
+            device = resolve_device(config.inference_device, model_type)
             mean_model = None
             vol_model = None
             model_status = {
@@ -579,6 +602,9 @@ def handle_forecast(
             refresh_data=refresh_data,
             execution_price=execution_price,
             execution_price_source=execution_price_source,
+            enable_regime_switching=enable_regime_switching,
+            regime_lookback=regime_lookback,
+            enable_performance_patches=enable_performance_patches,
         )
     except TwelveDataError as exc:
         return 502, build_error_payload(
@@ -623,6 +649,9 @@ def handle_forecast(
 
     if include_metadata:
         payload_out["data"]["metadata"] = result.metadata
+    regime_info = result.metadata.get("regime") if isinstance(result.metadata, dict) else None
+    if regime_info:
+        payload_out["data"]["regime"] = regime_info
     if include_predictions:
         try:
             payload_out["data"]["predictions"] = serialize_predictions(result.predictions)

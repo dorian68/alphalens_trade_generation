@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from pandas.tseries.frequencies import to_offset
 
 try:  # Darts is heavy; defer optional dependency errors until use.
     from darts import TimeSeries
@@ -15,13 +16,13 @@ TIMEFRAME_FREQ_MAP = {
     "15min": "15min",
     "30min": "30min",
     "45min": "45min",
-    "1h": "1H",
-    "2h": "2H",
-    "3h": "3H",
-    "4h": "4H",
-    "6h": "6H",
-    "8h": "8H",
-    "12h": "12H",
+    "1h": "1h",
+    "2h": "2h",
+    "3h": "3h",
+    "4h": "4h",
+    "6h": "6h",
+    "8h": "8h",
+    "12h": "12h",
     "1day": "1D",
 }
 
@@ -34,11 +35,26 @@ def _normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         raise KeyError("Dataframe must contain a 'close' column.")
     frame = df.copy()
     frame = frame.dropna(subset=["datetime", "close"])
-    frame["datetime"] = pd.to_datetime(frame["datetime"], utc=True)
+    frame["datetime"] = pd.to_datetime(frame["datetime"], utc=True).dt.tz_convert(None)
     frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
     frame = frame.dropna(subset=["close"])
     frame = frame.sort_values("datetime")
     return frame
+
+
+def _infer_series_frequency(idx: pd.DatetimeIndex) -> Optional[str]:
+    """Infer a best-effort frequency string from a datetime index."""
+    freq = pd.infer_freq(idx)
+    if freq is None:
+        deltas = idx.to_series().diff().dropna()
+        if not deltas.empty:
+            try:
+                freq = to_offset(deltas.mode().iloc[0]).freqstr
+            except Exception:
+                freq = None
+    if isinstance(freq, str) and freq.endswith("H"):
+        freq = freq.lower()
+    return freq
 
 
 def build_timeseries(df: pd.DataFrame) -> TimeSeries:
@@ -53,7 +69,32 @@ def build_timeseries(df: pd.DataFrame) -> TimeSeries:
     if TimeSeries is None:
         raise ImportError("darts is required for build_timeseries; install it from requirements.txt")
     frame = _normalize_dataframe(df)
-    return TimeSeries.from_dataframe(frame, time_col="datetime", value_cols="close")
+    idx = pd.DatetimeIndex(frame["datetime"])
+    freq = _infer_series_frequency(idx)
+    if freq is None:
+        raise ValueError(
+            "Unable to infer frequency for Darts TimeSeries; "
+            "ensure data has a regular cadence or fill missing timestamps."
+        )
+    freq_offset = to_offset(freq)
+    full_index = pd.date_range(start=idx.min(), end=idx.max(), freq=freq_offset)
+    frame = (
+        frame.set_index("datetime")
+        .reindex(full_index)
+        .sort_index()
+        .ffill()
+        .dropna(subset=["close"])
+        .reset_index()
+        .rename(columns={"index": "datetime"})
+    )
+    frame["datetime"] = pd.to_datetime(frame["datetime"], utc=True).dt.tz_convert(None)
+    return TimeSeries.from_dataframe(
+        frame,
+        time_col="datetime",
+        value_cols="close",
+        fill_missing_dates=True,
+        freq=freq_offset,
+    )
 
 
 def series_to_dataframe(series: pd.Series) -> pd.DataFrame:

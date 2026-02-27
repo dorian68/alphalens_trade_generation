@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+import numpy as np
 from scipy.stats import t
 
 from alphalens_forecast.config import AppConfig, RiskConfig
@@ -43,12 +44,17 @@ class RiskEngine:
         cdf_val = t.cdf(1.0, df=dof)
         return float(max(0.0, min(1.0, 2 * cdf_val - 1)))
 
-    def _position_size(self, sigma: float) -> float:
+    def _position_size(self, sigma: float, horizon_hours: Optional[float]) -> float:
         """Volatility-targeted position sizing capped by configuration."""
         if sigma <= 0:
             return 0.0
-        per_period_target = self._risk.target_volatility
-        size = per_period_target / sigma
+        annual_target = float(self._risk.target_volatility)
+        if horizon_hours is not None and horizon_hours > 0:
+            hours_per_year = 24.0 * 365.0
+            horizon_target = annual_target * np.sqrt(horizon_hours / hours_per_year)
+        else:
+            horizon_target = annual_target
+        size = horizon_target / sigma
         return float(min(size, self._risk.max_position))
 
     def build(
@@ -79,6 +85,7 @@ class RiskEngine:
             if quantiles_anchor <= 0:
                 quantiles_anchor = horizon.last_price
             direction = "long" if horizon.median >= horizon.last_price else "short"
+            horizon_hours = _parse_horizon_hours(horizon.horizon_label)
             if trade_mode_normalized == "forward":
                 entry_price = horizon.median
                 entry_type = "conditional_forecast"
@@ -104,35 +111,24 @@ class RiskEngine:
                 scale = entry_price / quantiles_anchor if quantiles_anchor > 0 else 1.0
                 tp *= scale
                 sl *= scale
-            if trade_mode_normalized == "forward":
+            if direction == "long":
                 denominator = max(abs(entry_price - sl), 1e-9)
                 risk_reward = abs(tp - entry_price) / denominator
-            elif execution_price is not None and execution_price > 0:
-                denominator = max(abs(entry_price - sl), 1e-9)
-                risk_reward = abs(tp - entry_price) / denominator
-            elif direction == "long":
-                denominator = max(horizon.median - sl, 1e-9)
-                risk_reward = (tp - horizon.median) / denominator
             else:
-                denominator = max(sl - horizon.median, 1e-9)
-                risk_reward = (horizon.median - tp) / denominator
+                denominator = max(abs(sl - entry_price), 1e-9)
+                risk_reward = abs(entry_price - tp) / denominator
 
             probability = horizon.probability_hit_tp_before_sl
             if probability is None:
                 span = max(abs(tp - sl), 1e-9)
-                if trade_mode_normalized == "forward":
-                    reference = entry_price
-                elif execution_price is not None and execution_price > 0:
-                    reference = entry_price
-                else:
-                    reference = horizon.median
+                reference = entry_price
                 if direction == "long":
                     probability = max(0.0, min(1.0, (tp - reference) / span))
                 else:
                     probability = max(0.0, min(1.0, (reference - tp) / span))
 
             confidence = self._confidence(horizon.dof)
-            position_size = self._position_size(horizon.sigma)
+            position_size = self._position_size(horizon.sigma, horizon_hours)
 
             payload["horizons"].append(
                 {
@@ -165,3 +161,16 @@ class RiskEngine:
             payload["entry_price"] = float(root_entry_price)
 
         return payload
+
+
+def _parse_horizon_hours(label: str) -> Optional[float]:
+    if not label:
+        return None
+    text = str(label).strip().lower()
+    if text.endswith("h"):
+        text = text[:-1]
+    try:
+        value = float(text)
+    except (TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) and value > 0 else None

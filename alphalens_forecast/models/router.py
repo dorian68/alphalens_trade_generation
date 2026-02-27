@@ -14,6 +14,7 @@ import torch
 
 from alphalens_forecast.storage.s3_store import S3Store, S3UnavailableError
 from alphalens_forecast.utils.text import slugify
+from alphalens_forecast.models.safe_load import safe_torch_load
 
 logger = logging.getLogger(__name__)
 
@@ -135,25 +136,14 @@ class _S3ModelBackend:
                 )
             return False
         try:
-            model_exists = self._s3_store.exists(model_key)
             metadata_exists = self._s3_store.exists(metadata_key)
         except S3UnavailableError as exc:
             if self._s3_only:
                 raise
             self._logger.warning("S3 unavailable; using local models only. (%s)", exc)
             return False
-        if not model_exists:
-            self._logger.warning(
-                "Model artifact missing in S3 for %s @ %s (%s).",
-                symbol,
-                timeframe,
-                model_type,
-            )
-            if self._s3_only:
-                raise FileNotFoundError(
-                    f"No trained model available for {symbol} @ {timeframe} ({model_type})."
-                )
-            return False
+        model_exists = False
+        model_key_to_use = model_key
         model_dir.mkdir(parents=True, exist_ok=True)
 
         manifest: dict[str, Any] = {}
@@ -230,9 +220,39 @@ class _S3ModelBackend:
             )
 
         model_file = manifest.get("model_file") or "model.pkl"
+        try:
+            model_exists = self._s3_store.exists(model_key)
+        except S3UnavailableError as exc:
+            if self._s3_only:
+                raise
+            self._logger.warning("S3 unavailable; using local models only. (%s)", exc)
+            return False
+        if not model_exists and metadata_exists and model_file and model_file != "model.pkl":
+            alt_key = f"{prefix}/{model_file}"
+            try:
+                if self._s3_store.exists(alt_key):
+                    model_key_to_use = alt_key
+                    model_exists = True
+            except S3UnavailableError as exc:
+                if self._s3_only:
+                    raise
+                self._logger.warning("S3 unavailable; using local models only. (%s)", exc)
+                return False
+        if not model_exists:
+            self._logger.warning(
+                "Model artifact missing in S3 for %s @ %s (%s).",
+                symbol,
+                timeframe,
+                model_type,
+            )
+            if self._s3_only:
+                raise FileNotFoundError(
+                    f"No trained model available for {symbol} @ {timeframe} ({model_type})."
+                )
+            return False
         local_model_path = model_dir / model_file
         if metadata_changed or not local_model_path.exists():
-            self._s3_store.download_file(model_key, local_model_path)
+            self._s3_store.download_file(model_key_to_use, local_model_path)
             self._logger.info(
                 "Fetched model artifact from S3 for %s @ %s (%s).",
                 symbol,
@@ -280,10 +300,10 @@ class _S3ModelBackend:
             self._logger.warning("S3 list failed; skipping auxiliary sync. (%s)", exc)
             remote_keys = []
 
-        extra_keys = [
-            key for key in remote_keys
-            if key not in {"model.pkl", "metadata.json", "metrics.json"}
-        ]
+        excluded = {"model.pkl", "metadata.json", "metrics.json"}
+        if model_file:
+            excluded.add(model_file)
+        extra_keys = [key for key in remote_keys if key not in excluded]
         downloaded = 0
         for rel_key in extra_keys:
             local_path = model_dir / rel_key
@@ -364,6 +384,10 @@ class _S3ModelBackend:
             return
         try:
             self._s3_store.upload_file(saved_path, model_key)
+            model_file = saved_path.relative_to(model_dir).as_posix()
+            if model_file and model_file != "model.pkl":
+                alt_key = f"{prefix}/{model_file}"
+                self._s3_store.upload_file(saved_path, alt_key)
             if metadata_path.exists():
                 self._s3_store.upload_file(metadata_path, metadata_key)
             metrics_path = model_dir / "metrics.json"
@@ -430,6 +454,59 @@ class ModelRouter:
     @property
     def s3_only(self) -> bool:
         return self._s3_only
+
+    def has_model(self, model_type: str, symbol: str, timeframe: str) -> bool:
+        """Check if a model artifact exists locally or in S3 without emitting warnings."""
+        model_dir = self.get_model_dir(model_type, symbol, timeframe)
+        manifest_path = self.get_metadata_path(model_type, symbol, timeframe)
+        if manifest_path.exists():
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as handle:
+                    manifest = json.load(handle)
+                model_file = manifest.get("model_file") or "model.pkl"
+                artifact_path = model_dir / model_file
+                if artifact_path.exists():
+                    return True
+            except (OSError, json.JSONDecodeError):
+                pass
+        legacy_path = self._legacy_model_path(model_type, symbol, timeframe)
+        if legacy_path.exists():
+            return True
+        if self._s3_store is None:
+            return False
+        model_key = self._s3_model_key(model_type, symbol, timeframe)
+        metadata_key = self._s3_metadata_key(model_type, symbol, timeframe)
+        try:
+            if self._s3_store.exists(model_key):
+                return True
+        except S3UnavailableError:
+            if self._s3_only:
+                raise
+            return False
+        try:
+            if not self._s3_store.exists(metadata_key):
+                return False
+            temp_path = (model_dir / "metadata.s3.tmp")
+            self._s3_store.download_file(metadata_key, temp_path)
+            try:
+                remote_text = temp_path.read_text(encoding="utf-8")
+            except OSError:
+                return False
+            finally:
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+            manifest = json.loads(remote_text) if remote_text else {}
+            model_file = manifest.get("model_file")
+            if not model_file or model_file == "model.pkl":
+                return False
+            alt_key = f"{self._s3_prefix(model_type, symbol, timeframe)}/{model_file}"
+            return self._s3_store.exists(alt_key)
+        except (S3UnavailableError, OSError, json.JSONDecodeError):
+            if self._s3_only:
+                raise
+            return False
 
     def get_model_dir(self, model_type: str, symbol: str, timeframe: str) -> Path:
         """Return the directory that hosts the pickle/manifest for the model."""
@@ -610,6 +687,9 @@ class ModelRouter:
                     storage_format,
                     artifact_path,
                     device=device,
+                    model_type=model_type,
+                    symbol=symbol,
+                    timeframe=timeframe,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -675,15 +755,31 @@ class ModelRouter:
         artifact_path: Path,
         *,
         device: Optional[str] = None,
+        model_type: Optional[str] = None,
+        symbol: Optional[str] = None,
+        timeframe: Optional[str] = None,
     ) -> Any:
         cls = _resolve_class(class_path)
+        log_model_type = model_type or class_path
+        log_symbol = symbol or "unknown"
+        log_timeframe = timeframe or "unknown"
+        effective_device = (device or "auto").strip()
+        map_location = "cpu" if storage_format == "state_dict" or effective_device.lower().startswith("cpu") else "none"
+        logger.info(
+            "Loading %s model for %s @ %s | device=%s | map_location=%s",
+            log_model_type,
+            log_symbol,
+            log_timeframe,
+            effective_device,
+            map_location,
+        )
         if storage_format == "native":
             instance = cls.load_native(artifact_path)
             if hasattr(instance, "set_device") and device:
                 instance.set_device(device)
             return instance
         if storage_format == "state_dict":
-            state = torch.load(artifact_path, map_location="cpu")
+            state = safe_torch_load(artifact_path, prefer_device="cpu")
             instance = cls()
             if not hasattr(instance, "load_state_dict"):
                 raise AttributeError(f"{class_path} lacks load_state_dict()")

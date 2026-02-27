@@ -60,14 +60,12 @@ AlphaLens Forecast solves end-to-end intraday swing forecasting:
 ## Model Selection and Mean Models
 The automatic selection rules are enforced by `alphalens_forecast/models/selection.py`:
 
-- `1h` (60min) uses `neuralprophet`.
-- `<= 30min` uses `nhits`.
-- `<= 240min` (except 60min) uses `nhits`.
+- `<= 240min` uses `nhits`.
 - `> 240min` uses `prophet`.
 
 Examples:
 - `15min` -> `nhits`
-- `1h` -> `neuralprophet`
+- `1h` -> `nhits`
 - `4h` -> `nhits`
 - `1d` -> `prophet`
 
@@ -318,6 +316,52 @@ Routes:
 - `GET /` or `GET /health` returns status, supported timeframes, and model types.
 - `POST /forecast` runs a forecast and returns payload + metadata.
 
+Example cURL calls:
+```bash
+API=http://127.0.0.1:8000
+
+# Health check
+curl -s "$API/health" | jq .
+```
+
+```bash
+API=http://127.0.0.1:8000
+
+# Basic forecast (defaults to config when fields omitted)
+curl -s "$API/forecast" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "EUR/USD",
+    "timeframe": "1h",
+    "horizons": [6, 12, 24],
+    "use_montecarlo": true,
+    "paths": 3000,
+    "trade_mode": "spot",
+    "include_metadata": true,
+    "include_predictions": false
+  }' | jq .
+```
+
+```bash
+API=http://127.0.0.1:8000
+
+# Override mean model, provide live price, include model status
+curl -s "$API/forecast?debug=true" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "BTC/USD",
+    "timeframe": "15min",
+    "horizons": [3, 6, 12],
+    "model_type": "nhits",
+    "trade_mode": "forward",
+    "live_price": 51234.5,
+    "include_predictions": true,
+    "include_model_info": true,
+    "force_retrain": false,
+    "refresh_data": false
+  }' | jq .
+```
+
 Request fields for `POST /forecast`:
 
 | Field | Type | Description |
@@ -421,8 +465,10 @@ S3 integration:
 ## Backtesting and Evaluation
 - `BacktestRunner` performs walk-forward evaluation on historical windows.
 - Metrics include RMSE, MAE, and direction accuracy per horizon.
+- Direction accuracy modes: `v1` = step-to-step agreement, `v2` = anchor-to-horizon, `v3` = v2 with a deadzone (default: v1 via `DIRECTION_ACCURACY_MODE`).
 - `TrajectoryRecorder` exports per-step predictions for each horizon.
 - `reporting/performance.py` aggregates metrics and coverage for p20/p80 bounds.
+- Reports include extended direction/coverage metrics by default (set `REPORTING_EXTENDED_METRICS=0` to disable).
 
 ## Custom Integrations and Utilities
 - `forecast_from_series` lets you bypass the data provider and run a forecast from a pandas Series.

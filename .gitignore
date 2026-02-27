@@ -20,3 +20,9 @@ models/
 
 # OS
 .DS_Store
+
+# PyTorch Lightning / TensorBoard
+lightning_logs/
+**/lightning_logs/
+**/events.out.tfevents.*
+*.tfevents*

@@ -1,4 +1,4 @@
-"""NHITS forecaster wrapper using Darts."""
+﻿"""NHITS forecaster wrapper using Darts."""
 from __future__ import annotations
 
 import logging
@@ -40,6 +40,14 @@ def _ensure_torch_safe_globals() -> None:
     _SAFE_GLOBALS_CONFIGURED = True
 
 
+def _is_cuda_deserialize_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return (
+        "attempting to deserialize object on a cuda device" in message
+        or "torch.cuda.is_available() is false" in message
+    )
+
+
 class NHiTSForecaster(BaseForecaster):
     """Wrapper around Darts N-HiTS model for high-frequency data."""
 
@@ -54,11 +62,15 @@ class NHiTSForecaster(BaseForecaster):
         super().__init__(name="NHITS", device=device)
         self._input_chunk_length = input_chunk_length
         self._output_chunk_length = output_chunk_length
-        self._n_epochs = 100
-        self._batch_size = 20000
+        self._n_epochs = 150
+        self._batch_size = 25000
         self._dropout = 0.1
         self._random_state = 42
         self._learning_rate = 1e-3
+        self._val_fraction = 0.1
+        self._min_val = 200
+
+        self._early_stopping_monitor = "val_loss"
         self._model = self._build_backend()
         self._series: Optional[TimeSeries] = None
         self._scaled_series: Optional[TimeSeries] = None
@@ -70,10 +82,21 @@ class NHiTSForecaster(BaseForecaster):
     def _build_backend(self) -> NHiTSModel:
         """Instantiate the underlying Darts model with stored hyperparameters."""
         pl_trainer_kwargs = None
+        callbacks = []
+        try:
+            from pytorch_lightning.callbacks import EarlyStopping
+
+            monitor = getattr(self, "_early_stopping_monitor", "val_loss")
+            callbacks.append(EarlyStopping(monitor=monitor, patience=10, mode="min"))
+        except Exception:
+            callbacks = []
         if self.device.lower().startswith("cuda"):
             # Centralized device handling: let Lightning manage GPU placement.
             pl_trainer_kwargs = {"accelerator": "gpu", "devices": 1}
         kwargs = {}
+        if callbacks:
+            pl_trainer_kwargs = dict(pl_trainer_kwargs or {})
+            pl_trainer_kwargs["callbacks"] = callbacks
         if pl_trainer_kwargs is not None:
             kwargs["pl_trainer_kwargs"] = pl_trainer_kwargs
         return NHiTSModel(
@@ -125,6 +148,14 @@ class NHiTSForecaster(BaseForecaster):
         target: pd.Series,
         regressors: Optional[pd.DataFrame] = None,
     ) -> None:
+        if self.device.lower().startswith("cuda"):
+            try:
+                if torch.cuda.is_available():
+                    logger.info("NHITS torch CUDA available | device=%s", torch.cuda.get_device_name(0))
+                else:
+                    logger.warning("NHITS torch CUDA requested but torch.cuda.is_available()=False.")
+            except Exception:
+                logger.warning("NHITS torch CUDA requested but unable to query device.")
         if regressors is not None and not regressors.empty:
             raise ValueError("NHITS is now univariate and does not accept regressors.")
         series = self._build_target_series(target)
@@ -138,15 +169,47 @@ class NHiTSForecaster(BaseForecaster):
         self._scaler.fit_from_series(series)
         logger.info("NHITS scaler fitted | mean=%.6f std=%.6f", self._scaler.mean_, self._scaler.std_)
         scaled_series = self._scaler.transform(series).astype(np.float32)
+        batch_size = self._resolve_batch_size(len(raw_values))
+        train_series, val_series = self._split_series(scaled_series)
+        desired_monitor = "val_loss" if val_series is not None else "train_loss"
+        if getattr(self, "_early_stopping_monitor", "val_loss") != desired_monitor:
+            self._early_stopping_monitor = desired_monitor
+            self._model = None
+        if batch_size != self._batch_size or self._model is None:
+            self._batch_size = batch_size
+            self._model = self._build_backend()
         dataloader_kwargs = self._dataloader_kwargs()
         if dataloader_kwargs:
             try:
-                self._model.fit(scaled_series, dataloader_kwargs=dataloader_kwargs)
+                self._model.fit(
+                    train_series,
+                    val_series=val_series,
+                    dataloader_kwargs=dataloader_kwargs,
+                )
             except TypeError:
                 logger.warning("NHITS dataloader_kwargs unsupported; falling back to defaults.")
-                self._model.fit(scaled_series)
+                try:
+                    self._model.fit(train_series, val_series=val_series)
+                except TypeError:
+                    self._model.fit(train_series)
         else:
-            self._model.fit(scaled_series)
+            try:
+                self._model.fit(train_series, val_series=val_series)
+            except TypeError:
+                self._model.fit(train_series)
+        trainer = getattr(self._model, "trainer", None)
+        if trainer is not None and self.device.lower().startswith("cuda"):
+            try:
+                accelerator = getattr(trainer, "accelerator", None)
+                strategy = getattr(trainer, "strategy", None)
+                root_device = getattr(strategy, "root_device", None) if strategy is not None else None
+                logger.info(
+                    "NHITS trainer accelerator=%s device=%s",
+                    accelerator.__class__.__name__ if accelerator is not None else "unknown",
+                    str(root_device) if root_device is not None else "unknown",
+                )
+            except Exception:
+                logger.debug("NHITS trainer device introspection failed.")
         self._series = series.astype(np.float32)
         self._scaled_series = scaled_series
         self._schema_version = self.MODEL_VERSION
@@ -232,6 +295,29 @@ class NHiTSForecaster(BaseForecaster):
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("NHITS failed to move checkpoint to CPU: %s", exc)
             except Exception as exc:  # noqa: BLE001
+                if _is_cuda_deserialize_error(exc):
+                    logger.warning(
+                        "NHITS checkpoint CUDA deserialize error at %s; retrying on CPU.",
+                        checkpoint_path,
+                    )
+                    try:
+                        load_kwargs = {
+                            "pl_trainer_kwargs": {"accelerator": "cpu"},
+                            "map_location": "cpu",
+                        }
+                        self._model = NHiTSModel.load(str(checkpoint_path), **load_kwargs)
+                        self._checkpoint_path = checkpoint_path
+                        try:
+                            self._model.to_cpu()
+                        except Exception as inner_exc:  # noqa: BLE001
+                            logger.warning("NHITS failed to move checkpoint to CPU: %s", inner_exc)
+                        return
+                    except Exception as retry_exc:  # noqa: BLE001
+                        logger.warning(
+                            "NHITS CPU retry failed at %s: %s",
+                            checkpoint_path,
+                            retry_exc,
+                        )
                 logger.warning(
                     "NHITS checkpoint load failed at %s; fallback to embedded state: %s",
                     checkpoint_path,
@@ -268,10 +354,12 @@ class NHiTSForecaster(BaseForecaster):
             "_input_chunk_length": 48,
             "_output_chunk_length": 24,
             "_n_epochs": 300,
-            "_batch_size": 32,
+            "_batch_size": 512,
             "_dropout": 0.1,
             "_random_state": 42,
             "_learning_rate": 1e-3,
+            "_val_fraction": 0.1,
+            "_min_val": 200,
         }
         for attr, value in defaults.items():
             if attr not in self.__dict__:
@@ -305,3 +393,20 @@ class NHiTSForecaster(BaseForecaster):
     def _refresh_scaled_series(self) -> None:
         if self._series is not None and self._scaler.is_fitted:
             self._scaled_series = self._scaler.transform(self._series)
+
+    def _resolve_batch_size(self, n_obs: int) -> int:
+        if n_obs <= 0:
+            return int(self._batch_size)
+        return int(max(32, min(self._batch_size, n_obs // 5)))
+
+    def _split_series(self, series: TimeSeries) -> tuple[TimeSeries, Optional[TimeSeries]]:
+        if len(series) < self._min_val:
+            return series, None
+        val_size = max(1, int(len(series) * self._val_fraction))
+        if val_size < 1 or val_size >= len(series):
+            return series, None
+        train = series[:-val_size]
+        val = series[-val_size:]
+        return train, val
+
+

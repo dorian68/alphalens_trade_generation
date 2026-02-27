@@ -22,13 +22,58 @@ from alphalens_forecast.training_schedule import TRAINING_FREQUENCIES
 
 logger = logging.getLogger(__name__)
 _INNER_PROGRESS_MODELS = {"nhits", "tft"}
+_GLOBAL_DEVICE_ENV_KEYS = ("ALPHALENS_DEVICE", "TORCH_DEVICE")
+_TORCH_CPU_ONLY_WARNED = False
 
 
 def _resolve_training_device(device: Optional[str]) -> str:
     """Default to TORCH_DEVICE when no explicit device was provided."""
     if device is None or not str(device).strip():
-        return os.getenv("TORCH_DEVICE", "cpu")
-    return device
+        for key in _GLOBAL_DEVICE_ENV_KEYS:
+            env_value = os.getenv(key)
+            if env_value is not None and str(env_value).strip():
+                return str(env_value)
+        return "cpu"
+    return str(device)
+
+
+def _log_device_context(model_type: str, device: str) -> None:
+    device_value = str(device or "cpu")
+    if not device_value.lower().startswith("cuda"):
+        logger.info("%s training device resolved to CPU.", model_type.upper())
+        return
+    try:
+        import torch
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("%s training requested CUDA but torch import failed: %s", model_type.upper(), exc)
+        return
+    if getattr(torch.version, "cuda", None) is None:
+        logger.warning(
+            "%s training requested CUDA but torch was built without CUDA support.",
+            model_type.upper(),
+        )
+        return
+    if not torch.cuda.is_available():
+        logger.warning("%s training requested CUDA but torch.cuda.is_available()=False.", model_type.upper())
+        return
+    try:
+        name = torch.cuda.get_device_name(0)
+    except Exception:
+        name = "unknown"
+    logger.info("%s training using CUDA device: %s.", model_type.upper(), name)
+
+
+def _warn_if_torch_cpu_only() -> None:
+    global _TORCH_CPU_ONLY_WARNED
+    if _TORCH_CPU_ONLY_WARNED:
+        return
+    try:
+        import torch
+    except Exception:
+        return
+    if getattr(torch.version, "cuda", None) is None:
+        logger.warning("Torch appears to be CPU-only (torch.version.cuda is None).")
+        _TORCH_CPU_ONLY_WARNED = True
 
 
 class _TrainingProgress:
@@ -123,6 +168,7 @@ def train_mean_model(
     frame_override = price_frame
     provider_input = data_provider
     resolved_device = _resolve_training_device(device)
+    _warn_if_torch_cpu_only()
     progress_enabled = model_type.lower() not in _INNER_PROGRESS_MODELS
     if isinstance(provider_input, pd.DataFrame):
         frame_override = provider_input
@@ -139,19 +185,30 @@ def train_mean_model(
         )
         progress.update("Preparing features")
         features = prepare_features(frame)
-        model = instantiate_model(model_type, device=resolved_device)
-        if training_config is not None:
-            model.set_dataloader_config(training_config)
-        progress.update("Fitting model")
-        model.fit(features.target, features.regressors)
-        metadata = {
-            "n_observations": len(frame),
-            "trained_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "training_frequency": TRAINING_FREQUENCIES[model_type]["frequency"],
-        }
-        progress.update("Saving model")
-        router.save_model(model_type, symbol, timeframe, model, metadata=metadata)
-        progress.update("Done")
+    model = instantiate_model(model_type, device=resolved_device)
+    actual_device = getattr(model, "device", resolved_device)
+    if str(resolved_device).lower().startswith("cuda") and str(actual_device).lower().startswith("cpu"):
+        logger.warning(
+            "%s requested CUDA but resolved to CPU. Check torch/CUDA install.",
+            model_type.upper(),
+        )
+    _log_device_context(model_type, actual_device)
+    try:
+        model.set_device(actual_device)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to apply device override for %s: %s", model_type.upper(), exc)
+    if training_config is not None:
+        model.set_dataloader_config(training_config)
+    progress.update("Fitting model")
+    model.fit(features.target, features.regressors)
+    metadata = {
+        "n_observations": len(frame),
+        "trained_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "training_frequency": TRAINING_FREQUENCIES[model_type]["frequency"],
+    }
+    progress.update("Saving model")
+    router.save_model(model_type, symbol, timeframe, model, metadata=metadata)
+    progress.update("Done")
     print(f"Trained and saved {model_type} model for {symbol} @ {timeframe}")
     return model
 
@@ -252,7 +309,16 @@ def train_tft(
     )
     features = prepare_features(frame)
     resolved_device = _resolve_training_device(device)
+    _warn_if_torch_cpu_only()
     model = instantiate_model("tft", device=resolved_device)
+    actual_device = getattr(model, "device", resolved_device)
+    if str(resolved_device).lower().startswith("cuda") and str(actual_device).lower().startswith("cpu"):
+        logger.warning("TFT requested CUDA but resolved to CPU. Check torch/CUDA install.")
+    _log_device_context("tft", actual_device)
+    try:
+        model.set_device(actual_device)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to apply device override for TFT: %s", exc)
     if training_config is not None:
         model.set_dataloader_config(training_config)
     model.fit(features.target, features.regressors)

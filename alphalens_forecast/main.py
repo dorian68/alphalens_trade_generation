@@ -140,6 +140,102 @@ def parse_args(config: AppConfig) -> argparse.Namespace:
         help="Force a data refresh before training/forecasting.",
     )
     parser.add_argument(
+        "--regime-switching",
+        type=_str_to_bool,
+        nargs="?",
+        const=True,
+        default=config.regime_switching,
+        help="Enable regime-based routing (default: False).",
+    )
+    parser.add_argument(
+        "--regime-lookback",
+        type=int,
+        default=config.regime_lookback,
+        help="Lookback window (bars) for regime detection.",
+    )
+    parser.add_argument(
+        "--regime-mode",
+        type=str,
+        default=config.regime_mode,
+        choices=("heuristic", "hmm"),
+        help="Regime detection mode (heuristic or hmm).",
+    )
+    parser.add_argument(
+        "--range-model",
+        type=str,
+        default=config.regime_range_model,
+        choices=("mean_reversion", "arima", "ets", "ou"),
+        help="Baseline model for RANGE regime routing (default: mean_reversion).",
+    )
+    parser.add_argument(
+        "--stress-model",
+        type=str,
+        default=config.regime_stress_model,
+        choices=("flat", "kalman", "arima"),
+        help="Baseline model for STRESS_CHOP regime routing (default: flat).",
+    )
+    parser.add_argument(
+        "--breakout-model",
+        type=str,
+        default=config.regime_breakout_model,
+        choices=("momentum", "arima", "ets", "ou"),
+        help="Baseline model for BREAKOUT regime routing (default: momentum).",
+    )
+    parser.add_argument(
+        "--regime-baseline-cache",
+        type=_str_to_bool,
+        nargs="?",
+        const=True,
+        default=config.regime_baseline_cache,
+        help="Cache regime baselines via ModelRouter (default: False).",
+    )
+    parser.add_argument(
+        "--enable-per-instrument-models",
+        type=_str_to_bool,
+        nargs="?",
+        const=True,
+        default=config.regime_per_instrument_models,
+        help="Enable per-instrument regime baselines with fallback (default: False).",
+    )
+    parser.add_argument(
+        "--enable-walk-forward-calib",
+        type=_str_to_bool,
+        nargs="?",
+        const=True,
+        default=config.regime_walk_forward_calib,
+        help="Enable walk-forward calibration for regime thresholds (default: False).",
+    )
+    parser.add_argument(
+        "--enable-score-smoothing",
+        type=_str_to_bool,
+        nargs="?",
+        const=True,
+        default=config.regime_score_smoothing,
+        help="Enable EWMA score smoothing for regime detection (default: False).",
+    )
+    parser.add_argument(
+        "--score-smoothing-alpha",
+        type=float,
+        default=None,
+        help="EWMA alpha for regime score smoothing (optional override).",
+    )
+    parser.add_argument(
+        "--enable-vol-mom-confirm",
+        type=_str_to_bool,
+        nargs="?",
+        const=True,
+        default=config.regime_vol_mom_confirm,
+        help="Enable volume/momentum confirmation for regime detection (default: False).",
+    )
+    parser.add_argument(
+        "--enable-performance-patches",
+        type=_str_to_bool,
+        nargs="?",
+        const=True,
+        default=config.performance_patches,
+        help="Enable performance-focused overlay patches (default: False).",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default=None,
@@ -248,6 +344,17 @@ def orchestrate(
     trajectory_recorder: Optional[TrajectoryRecorder] = None,
 ) -> OrchestrationResult:
     """Run the full forecasting workflow and return enriched artifacts."""
+    config.regime_mode = args.regime_mode
+    config.regime_range_model = args.range_model
+    config.regime_stress_model = args.stress_model
+    config.regime_breakout_model = args.breakout_model
+    config.regime_baseline_cache = args.regime_baseline_cache
+    config.regime_per_instrument_models = args.enable_per_instrument_models
+    config.regime_walk_forward_calib = args.enable_walk_forward_calib
+    config.regime_score_smoothing = args.enable_score_smoothing
+    if args.score_smoothing_alpha is not None:
+        config.regime_score_smoothing_alpha = float(args.score_smoothing_alpha)
+    config.regime_vol_mom_confirm = args.enable_vol_mom_confirm
     cache_dir = Path(args.data_cache_dir).expanduser() if args.data_cache_dir else None
     data_provider = DataProvider(config.twelve_data, cache_dir=cache_dir, auto_refresh=True)
     model_router = ModelRouter(model_dir)
@@ -265,6 +372,9 @@ def orchestrate(
         trajectory_recorder=trajectory_recorder,
         force_retrain=args.force_retrain,
         refresh_data=args.refresh_data,
+        enable_regime_switching=args.regime_switching,
+        regime_lookback=args.regime_lookback,
+        enable_performance_patches=args.enable_performance_patches,
     )
 
 
@@ -564,6 +674,9 @@ def run_backtest_mode(config: AppConfig, args: argparse.Namespace) -> None:
         samples=samples,
         stride=args.backtest_stride,
         min_history=max(1, args.backtest_min_history),
+        enable_regime_switching=args.regime_switching,
+        regime_lookback=args.regime_lookback,
+        enable_performance_patches=args.enable_performance_patches,
     )
     payload = json.dumps(result.to_dict(), indent=2)
     if args.backtest_output:

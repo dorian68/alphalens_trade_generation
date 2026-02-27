@@ -1,0 +1,98 @@
+{
+  "metadata": {
+    "symbol": "BTC/USD",
+    "timeframe": "1h",
+    "horizons": [
+      24
+    ],
+    "n_windows": 2,
+    "stride_bars": 24,
+    "min_history": 500,
+    "max_steps": 24,
+    "use_montecarlo": true,
+    "montecarlo_paths": 3000,
+    "regime_switching": true,
+    "regime_lookback": 200,
+    "window_start": "2025-06-12T14:00:00+00:00",
+    "window_end": "2026-02-20T23:00:00+00:00"
+  },
+  "aggregates": {
+    "24h": {
+      "rmse": 820.5912072572717,
+      "mae": 774.9246770941851,
+      "direction_accuracy": 0.6304347826086956,
+      "direction_accuracy_v1": 0.6304347826086956,
+      "direction_accuracy_v2": 1.0,
+      "direction_accuracy_v3": 1.0,
+      "conditional_direction_accuracy": NaN,
+      "coverage_50": NaN,
+      "coverage_80": NaN,
+      "prob_up_brier": NaN,
+      "evaluations": 2
+    }
+  },
+  "regime_aggregates": {
+    "RANGE": {
+      "rmse": 820.5912072572717,
+      "mae": 774.9246770941851,
+      "direction_accuracy": 0.6304347826086956,
+      "direction_accuracy_v1": 0.6304347826086956,
+      "direction_accuracy_v2": 1.0,
+      "direction_accuracy_v3": 1.0,
+      "conditional_direction_accuracy": NaN,
+      "coverage_50": NaN,
+      "coverage_80": NaN,
+      "prob_up_brier": NaN,
+      "evaluations": 2,
+      "mean_confidence": 0.3896571408632721
+    }
+  },
+  "evaluations": [
+    {
+      "cutoff": "2026-02-19T13:00:00+00:00",
+      "horizon": "24h",
+      "steps": 24,
+      "metrics": {
+        "rmse": 694.0290611388884,
+        "mae": 625.6474836650183,
+        "direction_accuracy": 0.5652173913043478,
+        "direction_accuracy_v1": 0.5652173913043478,
+        "direction_accuracy_v2": 1.0,
+        "direction_accuracy_v3": 1.0,
+        "conditional_direction_accuracy": NaN
+      },
+      "prediction_last": 66982.48212500001,
+      "actual_last": 66791.43,
+      "regime": {
+        "enabled": true,
+        "label": "RANGE",
+        "confidence": 0.3759749666276985,
+        "lookback": 200,
+        "route": "alternate"
+      }
+    },
+    {
+      "cutoff": "2026-02-20T13:00:00+00:00",
+      "horizon": "24h",
+      "steps": 24,
+      "metrics": {
+        "rmse": 947.153353375655,
+        "mae": 924.2018705233519,
+        "direction_accuracy": 0.6956521739130435,
+        "direction_accuracy_v1": 0.6956521739130435,
+        "direction_accuracy_v2": 1.0,
+        "direction_accuracy_v3": 1.0,
+        "conditional_direction_accuracy": NaN
+      },
+      "prediction_last": 67019.111625,
+      "actual_last": 68238.51,
+      "regime": {
+        "enabled": true,
+        "label": "RANGE",
+        "confidence": 0.40333931509884563,
+        "lookback": 200,
+        "route": "alternate"
+      }
+    }
+  ]
+}

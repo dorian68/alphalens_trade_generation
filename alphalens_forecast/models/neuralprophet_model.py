@@ -20,6 +20,7 @@ from pandas.tseries.frequencies import to_offset
 from alphalens_forecast.core.feature_engineering import to_neural_prophet_frame
 from alphalens_forecast.models.base import BaseForecaster
 from alphalens_forecast.models.dataloader_audit import log_dataloader_audit
+from alphalens_forecast.models.safe_load import safe_torch_load
 
 
 _SAFE_GLOBALS_REGISTERED = False
@@ -56,7 +57,9 @@ class NeuralProphetForecaster(BaseForecaster):
         self._freq: Optional[str] = None
         self._progress: str | None = None
         self._trainer_config = None
-        self._batch_size = 20000
+        self._batch_size = 512
+        self._val_fraction = 0.1
+        self._min_val = 200
         if self.device.lower().startswith("cuda"):
             # Centralized device handling: let Lightning manage GPU placement.
             self._trainer_config = {"accelerator": "gpu", "devices": 1}
@@ -74,12 +77,16 @@ class NeuralProphetForecaster(BaseForecaster):
         if "_progress" not in state:
             self._progress = None
         if "_batch_size" not in state:
-            self._batch_size = 16
+            self._batch_size = 512
         if "_trainer_config" not in state:
             self._trainer_config = None
             if getattr(self, "device", "cpu").lower().startswith("cuda"):
                 # Centralized device handling for restored checkpoints.
                 self._trainer_config = {"accelerator": "gpu", "devices": 1}
+        if "_val_fraction" not in state:
+            self._val_fraction = 0.1
+        if "_min_val" not in state:
+            self._min_val = 200
 
     def set_device(self, device: str) -> None:
         super().set_device(device)
@@ -109,6 +116,14 @@ class NeuralProphetForecaster(BaseForecaster):
         target: pd.Series,
         regressors: Optional[pd.DataFrame] = None,
     ) -> None:
+        if self.device.lower().startswith("cuda"):
+            try:
+                if torch.cuda.is_available():
+                    logger.info("NeuralProphet torch CUDA available | device=%s", torch.cuda.get_device_name(0))
+                else:
+                    logger.warning("NeuralProphet torch CUDA requested but torch.cuda.is_available()=False.")
+            except Exception:
+                logger.warning("NeuralProphet torch CUDA requested but unable to query device.")
         frame = to_neural_prophet_frame(target, regressors)
         freq = pd.infer_freq(pd.DatetimeIndex(frame["ds"]))
         if freq is None:
@@ -121,6 +136,8 @@ class NeuralProphetForecaster(BaseForecaster):
         kwargs = {}
         if self._trainer_config is not None:
             kwargs["trainer_config"] = self._trainer_config
+        batch_size = self._resolve_batch_size(len(frame))
+        self._batch_size = batch_size
         model = NeuralProphet(
             n_lags=30,
             n_changepoints=20,
@@ -130,7 +147,7 @@ class NeuralProphetForecaster(BaseForecaster):
             daily_seasonality=True,
             learning_rate=0.001,
             epochs=20,
-            batch_size=self._batch_size,
+            batch_size=batch_size,
             **kwargs,
         )
 
@@ -140,16 +157,67 @@ class NeuralProphetForecaster(BaseForecaster):
         config = getattr(self, "_dataloader_config", None)
         if config is not None:
             num_workers = int(getattr(config, "num_workers", 0))
+        train_frame, val_frame = self._split_frame(frame)
         if num_workers > 0:
             logger.info("Using DataLoader workers: num_workers=%s", num_workers)
-            self._model.fit(
-                frame,
-                freq=freq,
-                progress=self._progress_display(),
-                num_workers=num_workers,
-            )
+            try:
+                self._model.fit(
+                    train_frame,
+                    freq=freq,
+                    progress=self._progress_display(),
+                    num_workers=num_workers,
+                    validation_df=val_frame,
+                    early_stopping=True,
+                )
+            except TypeError:
+                try:
+                    self._model.fit(
+                        train_frame,
+                        freq=freq,
+                        progress=self._progress_display(),
+                        num_workers=num_workers,
+                        validation_df=val_frame,
+                    )
+                except TypeError:
+                    self._model.fit(
+                        frame,
+                        freq=freq,
+                        progress=self._progress_display(),
+                        num_workers=num_workers,
+                    )
         else:
-            self._model.fit(frame, freq=freq, progress=self._progress_display())
+            try:
+                self._model.fit(
+                    train_frame,
+                    freq=freq,
+                    progress=self._progress_display(),
+                    validation_df=val_frame,
+                    early_stopping=True,
+                )
+            except TypeError:
+                try:
+                    self._model.fit(
+                        train_frame,
+                        freq=freq,
+                        progress=self._progress_display(),
+                        validation_df=val_frame,
+                    )
+                except TypeError:
+                    self._model.fit(frame, freq=freq, progress=self._progress_display())
+        if self.device.lower().startswith("cuda"):
+            trainer = getattr(self._model, "trainer", None) if self._model is not None else None
+            if trainer is not None:
+                try:
+                    accelerator = getattr(trainer, "accelerator", None)
+                    strategy = getattr(trainer, "strategy", None)
+                    root_device = getattr(strategy, "root_device", None) if strategy is not None else None
+                    logger.info(
+                        "NeuralProphet trainer accelerator=%s device=%s",
+                        accelerator.__class__.__name__ if accelerator is not None else "unknown",
+                        str(root_device) if root_device is not None else "unknown",
+                    )
+                except Exception:
+                    logger.debug("NeuralProphet trainer device introspection failed.")
         log_dataloader_audit(
             model_name=self.name,
             device=self.device,
@@ -157,6 +225,21 @@ class NeuralProphetForecaster(BaseForecaster):
             model=self._model,
             source_hint="NeuralProphet internal",
         )
+
+    def _resolve_batch_size(self, n_obs: int) -> int:
+        if n_obs <= 0:
+            return int(self._batch_size)
+        return int(max(32, min(self._batch_size, n_obs // 5)))
+
+    def _split_frame(self, frame: pd.DataFrame) -> tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+        if len(frame) < self._min_val:
+            return frame, None
+        val_size = max(1, int(len(frame) * self._val_fraction))
+        if val_size < 1 or val_size >= len(frame):
+            return frame, None
+        train = frame.iloc[:-val_size].copy()
+        val = frame.iloc[-val_size:].copy()
+        return train, val
 
     def forecast(
         self,
@@ -251,7 +334,7 @@ class NeuralProphetForecaster(BaseForecaster):
             instance._progress = meta.get("progress", instance._progress)
         return instance
 def _load_checkpoint(path: Path, accelerator: Optional[str] = None) -> NeuralProphet:
-    map_location = "cpu" if accelerator == "cpu" else None
-    model = torch.load(path, map_location=map_location, weights_only=False)
+    prefer_device = "cpu" if accelerator == "cpu" else "auto"
+    model = safe_torch_load(path, prefer_device=prefer_device, weights_only=False)
     model.restore_trainer(accelerator=accelerator)
     return model

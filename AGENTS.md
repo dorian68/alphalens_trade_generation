@@ -2,15 +2,14 @@
 
 Source of truth: `alphalens_forecast/models/selection.py` (select_model_type).
 
-Auto-selection rules:
-- <= 30 min -> nhits
-- > 30 min and < 240 min -> neuralprophet
-- >= 240 min (4h+) -> prophet
+Auto-selection rules (as implemented in `select_model_type`):
+- <= 240 min -> nhits
+- > 240 min -> prophet
 
 Examples:
 - 15min -> nhits
-- 1h -> neuralprophet
-- 4h -> prophet
+- 1h -> nhits
+- 4h -> nhits
 - 1d -> prophet
 
 Notes:

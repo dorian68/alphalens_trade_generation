@@ -104,11 +104,10 @@ class MonteCarloSimulator:
             sigma_array = np.full(steps, float(sigma))
             sigma_mode = "scalar"
 
-        scaled_sigma = sigma_array * np.sqrt(step_hours)
+        # Treat drift/sigma as per-step inputs (no step_hours scaling here).
+        scaled_sigma = sigma_array
 
-        # Student-t variance normalization
         t_scale = np.sqrt((dof - 2.0) / dof)
-
         debug_info: Optional[Dict[str, Any]] = None
         if debug_enabled:
             debug_info = {
@@ -131,13 +130,15 @@ class MonteCarloSimulator:
         # Monte Carlo generation
         # -------------------------------
 
-        with tqdm(
+        progress = tqdm(
             total=self.paths,
             desc="Monte Carlo paths",
             disable=not self._show_progress,
-        ):
+        )
+        try:
             # --- innovations ---
             raw = self._rng.standard_t(dof, size=(self.paths, steps))
+            raw = raw * np.sqrt((dof - 2.0) / dof)
 
             if skew != 0.0:
                 raw = np.where(
@@ -145,17 +146,22 @@ class MonteCarloSimulator:
                     raw * (1.0 + skew),
                     raw * (1.0 - skew),
                 )
+                raw = raw - np.mean(raw)
+                std = np.std(raw)
+                if std > 0:
+                    raw = raw / std
 
-            # normalize innovations
-            raw = raw - np.mean(raw)
-            raw = raw / np.std(raw)
-
-            shocks = raw * t_scale
+            shocks = raw
 
             # --- log-price dynamics ---
-            log_returns = drift * step_hours + scaled_sigma * shocks
+            log_returns = drift + scaled_sigma * shocks
             cumulative = np.cumsum(log_returns, axis=1)
             prices = current_price * np.exp(cumulative)
+        finally:
+            try:
+                progress.update(self.paths)
+            finally:
+                progress.close()
 
         # -------------------------------
         # TP / SL stopping logic
@@ -253,10 +259,10 @@ class MonteCarloSimulator:
         else:
             sigma_array = np.full(steps, float(sigma))
 
-        scaled_sigma = sigma_array * np.sqrt(step_hours)
-        t_scale = np.sqrt((dof - 2.0) / dof)
+        scaled_sigma = sigma_array
 
         raw = self._rng.standard_t(dof, size=(self.paths, steps))
+        raw = raw * np.sqrt((dof - 2.0) / dof)
 
         if skew != 0.0:
             raw = np.where(
@@ -264,11 +270,14 @@ class MonteCarloSimulator:
                 raw * (1.0 + skew),
                 raw * (1.0 - skew),
             )
+            raw = raw - np.mean(raw)
+            std = np.std(raw)
+            if std > 0:
+                raw = raw / std
 
-        raw = (raw - np.mean(raw)) / np.std(raw)
-        shocks = raw * t_scale
+        shocks = raw
 
-        log_returns = drift * step_hours + scaled_sigma * shocks
+        log_returns = drift + scaled_sigma * shocks
         cumulative = np.cumsum(log_returns, axis=1)
 
         prices = current_price * np.exp(cumulative)

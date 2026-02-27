@@ -1,6 +1,8 @@
 # %%
 from pathlib import Path
 import pandas as pd
+
+from alphalens_forecast.models.training import train_regime_models
 path_file = "/home/ubuntu/.cache/kagglehub/datasets/mczielinski/bitcoin-historical-data/versions/434"
 # # Download latest version of the BTC dataset and load it.
 # path = kagglehub.dataset_download("mczielinski/bitcoin-historical-data")
@@ -277,6 +279,12 @@ from alphalens_forecast.training import train_nhits, train_neuralprophet, train_
 from alphalens_forecast.models.router import ModelRouter
 from alphalens_forecast.data import DataProvider   
 from alphalens_forecast.evaluation import load_model, test_model, time_split, plot_forecast_vs_real
+from alphalens_forecast.models.training import train_regime_models
+from alphalens_forecast.regime_detection.deterministic import (                              
+    REGIME_RANGE,                                                                            
+    REGIME_BREAKOUT,                                                                         
+    REGIME_STRESS_CHOP,                                                                      
+)                                                                                            
 
 provider = DataProvider()
 # frame = provider.load_data("EUR/USD", "15min", refresh=True, max_points=500000)
@@ -302,7 +310,6 @@ DEVICE = "cuda"
 print("---- Training just started ----")
 
 
-# symbol = "EUR/USD"
 asset_list = ["EUR/USD","GBP/USD","AUD/USD","BTC/USD","ETH/USD","XAU/USD","XLM/USD"]
 for symbol in asset_list:
     for timeframe in ("15min","30min","1h","4h"):
@@ -310,8 +317,13 @@ for symbol in asset_list:
         train_neuralprophet(symbol, timeframe, model_router=router,device=DEVICE)
         train_prophet(symbol, timeframe, model_router=router,device=DEVICE)
         train_egarch(symbol, timeframe, model_router=router)
+        train_regime_models(symbol, timeframe, regime_label=REGIME_RANGE, model_router=router)   
+        train_regime_models(symbol, timeframe, regime_label=REGIME_BREAKOUT, model_router=router)                       
+        train_regime_models(symbol, timeframe, regime_label=REGIME_STRESS_CHOP, model_router=router)                    
 
 print("---- Training just ended ----")
+
+
 
 # %%
 import importlib
@@ -355,9 +367,9 @@ close_series = frame["close"].dropna()
 # price_frame = provider.load_data("EUR/USD", "15min")
 # close_series = price_frame["close"].dropna()
 
-roll_steps = 500
+roll_steps = 5000
 train, _, test = time_split(close_series)
-model = load_model("neuralprophet", "EUR/USD", "15min")
+model = load_model("neuralprophet", "XLM/USD", "15min")
 preds = test_model("neuralprophet", model, test, "15min",train_series=train,rolling_steps=roll_steps)
 plot_forecast_vs_real(preds, test[:roll_steps],show_metrics=True,show_confidence=True)
 

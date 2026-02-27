@@ -2,12 +2,23 @@
 from __future__ import annotations
 
 import io
+import logging
 import pickle
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+
+def _is_cuda_deserialize_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return (
+        "attempting to deserialize object on a cuda device" in message
+        or "torch.cuda.is_available() is false" in message
+    )
 
 
 class BaseForecaster(ABC):
@@ -74,4 +85,31 @@ class BaseForecaster(ABC):
                     return Path
                 return super().find_class(module, name)
 
-        return _CompatUnpickler(io.BytesIO(payload)).load()
+        def _load() -> Any:
+            return _CompatUnpickler(io.BytesIO(payload)).load()
+
+        try:
+            return _load()
+        except Exception as exc:  # noqa: BLE001
+            if not _is_cuda_deserialize_error(exc):
+                raise
+            logger.warning(
+                "CUDA deserialization error during unpickle; retrying on CPU."
+            )
+            try:
+                import torch
+            except Exception:
+                raise
+
+            load_from_bytes = getattr(torch.storage, "_load_from_bytes", None)
+            if load_from_bytes is None:
+                raise
+
+            def _cpu_load_from_bytes(buffer: bytes, *args: Any, **kwargs: Any) -> Any:
+                return torch.load(io.BytesIO(buffer), map_location="cpu")
+
+            try:
+                torch.storage._load_from_bytes = _cpu_load_from_bytes
+                return _load()
+            finally:
+                torch.storage._load_from_bytes = load_from_bytes
